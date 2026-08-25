@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Asset, Project, Segment, Shot } from '@/types'
+import type { Asset, Project, Shot } from '@/types'
 import { COST, delay, mockImage, uid } from '@/services/generation'
 import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
 
@@ -24,23 +24,23 @@ interface State {
   createProject: (name: string) => void
   deleteProject: (id: string) => void
 
-  // step1 剧本
+  // step1 故事
   setScript: (text: string) => void
 
-  // step2 分段
+  // step2 拆解
   generateSegments: () => Promise<void>
   addSegment: (title: string, text: string) => void
   updateSegmentTitle: (id: string, title: string) => void
   deleteSegment: (id: string) => void
 
-  // step3 资产
+  // step3 角色与场景
   extractAssets: () => Promise<void>
   generateAssetImages: (ids: string[]) => Promise<void>
   clearAssetImage: (id: string) => void
   updateAsset: (id: string, patch: Partial<Asset>) => void
   deleteAsset: (id: string) => void
 
-  // step4 分镜
+  // step4 镜头
   generateShots: (segNos: number[]) => Promise<void>
   updateShot: (id: string, patch: Partial<Shot>) => void
   deleteShot: (id: string) => void
@@ -48,6 +48,28 @@ interface State {
 
   // step5 视频
   generateVideos: (shotIds: string[]) => Promise<void>
+
+  // 确认即推进：先置 generating、再切页、最后跑生成
+  startSegments: () => Promise<void> // Step1 → Step2
+  startAssets: () => Promise<void> // Step2 → Step3
+  startShots: (segNos: number[]) => Promise<void> // Step3 → Step4
+  startVideos: (shotIds: string[]) => Promise<void> // Step4 → Step5
+}
+
+/* ---------- 下游失效标记（模块内私有） ---------- */
+function markStaleFromSegments(p: Project) {
+  if (p.assets.length) p.assetStale = true
+  if (p.shots.length) p.shotStale = true
+  p.shots.forEach((s) => {
+    if (s.video.state === 'done') s.video.stale = true
+  })
+}
+
+function markStaleFromAssets(p: Project) {
+  if (p.shots.length) p.shotStale = true
+  p.shots.forEach((s) => {
+    if (s.video.state === 'done') s.video.stale = true
+  })
 }
 
 function load(): Project[] {
@@ -57,7 +79,7 @@ function load(): Project[] {
   } catch {
     /* ignore */
   }
-  // 首次：内置《最后的外卖》示例项目（已完成到分镜，视频未生成）
+  // 首次：内置「最后的外卖」示例项目（已完成到镜头，视频未生成）
   const seed: Project = {
     id: 'demo_lastfood',
     name: '最后的外卖',
@@ -100,9 +122,66 @@ export const useStore = create<State>((set, get) => {
       return { projects }
     })
   }
-  const current = () => get().projects.find((p) => p.id === get().currentId)
 
   let toastT: ReturnType<typeof setTimeout> | null = null
+
+  /* ---------- 生成过程的「后半段」，供 generate* 与 start* 复用 ---------- */
+  const finishSegments = async () => {
+    await delay(1600)
+    patchProject((p) => {
+      p.balance -= COST.segGen
+      p.segments = sampleSegments()
+      p.segStatus = 'done'
+      markStaleFromSegments(p)
+    })
+    get().showToast('已生成 3 个故事段落')
+  }
+
+  const finishAssets = async () => {
+    await delay(1600)
+    patchProject((p) => {
+      p.balance -= COST.assetExtract
+      // 保留已生成的参考图（若同名资产已存在图片）
+      const prev = new Map(p.assets.map((a) => [a.name, a]))
+      p.assets = sampleAssets().map((a) => {
+        const old = prev.get(a.name)
+        return old && old.imgState === 'done' ? { ...a, imgState: 'done', imageUrl: old.imageUrl } : a
+      })
+      p.assetStatus = 'done'
+      p.assetStale = false
+      markStaleFromAssets(p)
+    })
+    get().showToast('已提取 2 个角色、1 个场景')
+  }
+
+  const finishShots = async (segNos: number[]) => {
+    await delay(1600)
+    patchProject((p) => {
+      p.balance -= COST.shotGenEach * segNos.length
+      const all = sampleShots()
+      p.shots = all.filter((s) => segNos.includes(s.no)).map((s, i) => ({ ...s, no: i + 1 }))
+      p.shotStatus = 'done'
+      p.shotStale = false
+    })
+    get().showToast(`已生成 ${segNos.length} 个镜头`)
+  }
+
+  const finishVideos = async (shotIds: string[]) => {
+    for (let i = 0; i < shotIds.length; i++) {
+      await delay(1200)
+      const id = shotIds[i]
+      patchProject((p) => {
+        const s = p.shots.find((x) => x.id === id)
+        if (s) {
+          s.video.state = 'done'
+          s.video.stale = false
+          s.video.versions = [{ tag: 'v1', preferred: true, url: mockImage(`镜头#${s.no}`, s.id) }]
+          p.balance -= COST.videoEach
+        }
+      })
+    }
+    get().showToast('视频已全部生成')
+  }
 
   return {
     projects: load(),
@@ -121,9 +200,11 @@ export const useStore = create<State>((set, get) => {
     },
 
     createProject: (name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return // 由 UI 层禁用按钮兜底，这里再防一次
       const p: Project = {
         id: uid('proj'),
-        name: name.trim() || `未命名项目 ${new Date().toISOString().slice(5, 10)}`,
+        name: trimmed,
         no: get().projects.length + 12,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -152,14 +233,8 @@ export const useStore = create<State>((set, get) => {
 
     generateSegments: async () => {
       patchProject((p) => { p.segStatus = 'generating' })
-      get().showToast('正在生成剧情分段…')
-      await delay(1600)
-      patchProject((p) => {
-        p.balance -= COST.segGen
-        p.segments = sampleSegments()
-        p.segStatus = 'done'
-      })
-      get().showToast('已生成 3 个剧情分段')
+      get().showToast('正在拆解故事…')
+      await finishSegments()
     },
 
     addSegment: (title, text) => {
@@ -167,7 +242,7 @@ export const useStore = create<State>((set, get) => {
         const no = p.segments.length + 1
         p.segments.push({ id: uid('seg'), no, title: title.trim(), dur: '15s', text: text.trim() })
       })
-      get().showToast('已新增分段')
+      get().showToast('已新增故事段落')
     },
 
     updateSegmentTitle: (id, title) => {
@@ -182,24 +257,13 @@ export const useStore = create<State>((set, get) => {
         p.segments = p.segments.filter((x) => x.id !== id)
         p.segments.forEach((s, i) => (s.no = i + 1))
       })
-      get().showToast('已删除分段')
+      get().showToast('已删除故事段落')
     },
 
     extractAssets: async () => {
       patchProject((p) => { p.assetStatus = 'generating' })
-      get().showToast('正在抽出角色与场景…')
-      await delay(1600)
-      patchProject((p) => {
-        p.balance -= COST.assetExtract
-        // 保留已生成的参考图（若同名资产已存在图片）
-        const prev = new Map(p.assets.map((a) => [a.name, a]))
-        p.assets = sampleAssets().map((a) => {
-          const old = prev.get(a.name)
-          return old && old.imgState === 'done' ? { ...a, imgState: 'done', imageUrl: old.imageUrl } : a
-        })
-        p.assetStatus = 'done'
-      })
-      get().showToast('已提取 2 个角色、1 个场景')
+      get().showToast('正在提取角色与场景…')
+      await finishAssets()
     },
 
     generateAssetImages: async (ids) => {
@@ -241,15 +305,8 @@ export const useStore = create<State>((set, get) => {
 
     generateShots: async (segNos) => {
       patchProject((p) => { p.shotStatus = 'generating' })
-      get().showToast('正在根据剧情分段生成分镜…')
-      await delay(1600)
-      patchProject((p) => {
-        p.balance -= COST.shotGenEach * segNos.length
-        const all = sampleShots()
-        p.shots = all.filter((s) => segNos.includes(s.no)).map((s, i) => ({ ...s, no: i + 1 }))
-        p.shotStatus = 'done'
-      })
-      get().showToast(`已生成 ${segNos.length} 条分镜`)
+      get().showToast('正在生成镜头设计…')
+      await finishShots(segNos)
     },
 
     updateShot: (id, patch) => {
@@ -264,7 +321,7 @@ export const useStore = create<State>((set, get) => {
         p.shots = p.shots.filter((x) => x.id !== id)
         p.shots.forEach((s, i) => (s.no = i + 1))
       })
-      get().showToast('已删除分镜')
+      get().showToast('已删除镜头')
     },
 
     regenerateShot: async (id) => {
@@ -272,33 +329,52 @@ export const useStore = create<State>((set, get) => {
         const s = p.shots.find((x) => x.id === id)
         if (s) s.done = false
       })
-      get().showToast('正在重出该分镜…')
+      get().showToast('正在重新生成该镜头…')
       await delay(1400)
       patchProject((p) => {
         const s = p.shots.find((x) => x.id === id)
-        if (s) { s.done = true; p.balance -= COST.shotGenEach }
+        if (s) {
+          s.done = true
+          p.balance -= COST.shotGenEach
+          if (s.video.state === 'done') s.video.stale = true
+        }
       })
-      get().showToast('该分镜已重新生成')
+      get().showToast('该镜头已重新生成')
     },
 
     generateVideos: async (shotIds) => {
       patchProject((p) => {
         p.shots.forEach((s) => { if (shotIds.includes(s.id)) s.video.state = 'generating' })
       })
-      get().showToast('正在生成分镜视频…')
-      for (let i = 0; i < shotIds.length; i++) {
-        await delay(1200)
-        const id = shotIds[i]
-        patchProject((p) => {
-          const s = p.shots.find((x) => x.id === id)
-          if (s) {
-            s.video.state = 'done'
-            s.video.versions = [{ tag: 'v1', preferred: true, url: mockImage(`分镜#${s.no}`, s.id) }]
-            p.balance -= COST.videoEach
-          }
-        })
-      }
-      get().showToast('视频已全部生成')
+      get().showToast('正在生成视频…')
+      await finishVideos(shotIds)
+    },
+
+    /* ---------- 确认即推进：先置 generating，再切页，最后跑生成 ---------- */
+    startSegments: async () => {
+      patchProject((p) => { p.segStatus = 'generating' })
+      set({ step: 2 })
+      await finishSegments()
+    },
+
+    startAssets: async () => {
+      patchProject((p) => { p.assetStatus = 'generating' })
+      set({ step: 3 })
+      await finishAssets()
+    },
+
+    startShots: async (segNos) => {
+      patchProject((p) => { p.shotStatus = 'generating' })
+      set({ step: 4 })
+      await finishShots(segNos)
+    },
+
+    startVideos: async (shotIds) => {
+      patchProject((p) => {
+        p.shots.forEach((s) => { if (shotIds.includes(s.id)) s.video.state = 'generating' })
+      })
+      set({ step: 5 })
+      await finishVideos(shotIds)
     },
   }
 })

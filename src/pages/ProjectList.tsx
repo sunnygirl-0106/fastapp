@@ -3,6 +3,7 @@ import { useStore } from '@/store/workflowStore'
 import { ProjectsTopBar } from '@/components/TopBar'
 import { Button, Input, Label, Modal, Popover, MenuItem } from '@/components/ui'
 import { DEFAULT_BALANCE } from '@/data/mock'
+import { formatCreatedAt, isDone, isRunning, projectStatus } from '@/utils/project'
 
 export default function ProjectList() {
   const projects = useStore((s) => s.projects)
@@ -17,10 +18,13 @@ export default function ProjectList() {
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
 
   const submit = () => {
+    if (!name.trim()) return
     createProject(name)
     setName('')
     setCreateOpen(false)
   }
+
+  const delTarget = projects.find((p) => p.id === confirmDel)
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -45,48 +49,67 @@ export default function ProjectList() {
         </aside>
 
         {/* 主区 */}
-        <main className="flex-1 px-8 py-4">
-          <div className="mb-4 flex justify-center">
-            <Button variant="ghost" onClick={() => setCreateOpen(true)}>
-              ＋ 新建
+        <main className="flex-1 px-8 py-6">
+          {/* 页头 */}
+          <div className="mb-6 flex items-end justify-between">
+            <div>
+              <h1 className="text-[22px] font-semibold">我的项目</h1>
+              <p className="mt-1 text-[13px] text-muted">管理你的 AI 视频项目 · 共 {projects.length} 个项目</p>
+            </div>
+            <Button variant="primary" size="lg" onClick={() => setCreateOpen(true)}>
+              ＋ 新建项目
             </Button>
           </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                onClick={() => openProject(p.id)}
-                className="group relative cursor-pointer rounded-xl bg-panel px-5 py-4 transition-colors hover:bg-panel2"
-              >
-                <div className="text-brand">《{p.name}》</div>
-                <div className="mt-1 text-xs text-faint">
-                  #{p.no} · {new Date(p.createdAt).toLocaleString('zh-CN', { hour12: false }).slice(0, 16).replace(/\//g, '-')}
-                </div>
-                <button
-                  className="absolute right-3 top-3 hidden text-muted hover:text-white group-hover:block"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    setMenu({ id: p.id, top: r.bottom + 4, left: r.left - 130 })
-                  }}
+            {projects.map((p) => {
+              const running = isRunning(p)
+              const done = isDone(p)
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => openProject(p.id)}
+                  className="group relative cursor-pointer rounded-xl border border-line/60 bg-panel px-5 py-4 pr-12 transition-colors hover:border-line hover:bg-panel2"
                 >
-                  ⋯
-                </button>
-              </div>
-            ))}
+                  <div className="text-[15px] font-medium text-white">{p.name}</div>
+
+                  <div className="mt-2 flex items-center gap-2 text-[13px]">
+                    {running && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />}
+                    <span className={running ? 'text-amber-300' : done ? 'text-brand' : 'text-muted'}>
+                      {projectStatus(p)}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 text-xs text-faint">{p.config.ratio} · {p.config.style}</div>
+                  <div className="mt-1 text-xs text-faint">{formatCreatedAt(p.createdAt)}</div>
+
+                  {/* ⋯ 按钮：位置固定预留（pr-12），默认弱显示，悬浮变亮，绝不消失 */}
+                  <button
+                    className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-md text-muted opacity-50 transition hover:bg-line hover:text-white group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      setMenu({ id: p.id, top: r.bottom + 4, left: r.left - 130 })
+                    }}
+                  >
+                    ⋯
+                  </button>
+                </div>
+              )
+            })}
           </div>
         </main>
       </div>
 
       {createOpen && (
         <Modal
-          title="新建全自动AI生成项目"
+          title="新建视频项目"
           onClose={() => setCreateOpen(false)}
           footer={
             <>
               <Button onClick={() => setCreateOpen(false)}>取消</Button>
-              <Button variant="primary" onClick={submit}>
-                创建
+              <Button variant="primary" disabled={!name.trim()} onClick={submit}>
+                创建项目
               </Button>
             </>
           }
@@ -94,11 +117,12 @@ export default function ProjectList() {
           <Label>项目名称</Label>
           <Input
             autoFocus
-            placeholder="输入项目名称"
+            placeholder="例如：最后的外卖"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
+          <div className="mt-2 text-[13px] text-faint">创建后将从添加故事内容开始。</div>
         </Modal>
       )}
 
@@ -116,27 +140,27 @@ export default function ProjectList() {
         </Popover>
       )}
 
-      {confirmDel && (
+      {confirmDel && delTarget && (
         <Modal
           title="删除项目"
-          width={360}
+          width={380}
           onClose={() => setConfirmDel(null)}
           footer={
             <>
               <Button onClick={() => setConfirmDel(null)}>取消</Button>
               <Button
-                variant="primary"
+                variant="danger-solid"
                 onClick={() => {
                   deleteProject(confirmDel)
                   setConfirmDel(null)
                 }}
               >
-                确认
+                删除项目
               </Button>
             </>
           }
         >
-          <div className="text-sm">确定删除该项目？此操作不可撤销。</div>
+          <div className="text-sm text-white/85">确定删除「{delTarget.name}」吗？删除后无法恢复。</div>
         </Modal>
       )}
     </div>

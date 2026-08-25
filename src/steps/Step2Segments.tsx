@@ -1,163 +1,106 @@
 import { useState } from 'react'
 import type { Project, Segment } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { COST } from '@/services/generation'
+import { COST, MODELS } from '@/services/generation'
+import { no2, fmtDur } from '@/utils/project'
 import {
+  ActionBar,
   Button,
-  CostRow,
+  Diamond,
   Drawer,
-  FakeSelect,
+  GenerateConfirmModal,
+  GeneratingState,
   Input,
-  InlineRename,
   Label,
   Modal,
-  Spinner,
-  StatusPill,
+  PageHeader,
+  ReadonlyField,
   Textarea,
+  fmt,
 } from '@/components/ui'
 
-const COLS = ['段号', '标题', '时长', '场景', '出场角色', '核心动作', '时间线', '原文']
-
 export default function Step2Segments({ project }: { project: Project }) {
-  const { generateSegments, addSegment, updateSegmentTitle, deleteSegment } = useStore()
-  const [genOpen, setGenOpen] = useState(false)
+  const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment } = useStore()
   const [regenOpen, setRegenOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [extractOpen, setExtractOpen] = useState(false)
   const [edit, setEdit] = useState<Segment | null>(null)
-  const [rename, setRename] = useState<string | null>(null)
 
   const st = project.segStatus
   const segs = project.segments
 
-  const doGen = async () => {
-    setGenOpen(false)
-    setRegenOpen(false)
-    await generateSegments()
+  if (st === 'generating') {
+    return (
+      <>
+        <GeneratingState
+          title="正在拆解故事"
+          desc="AI 正在理解情节、角色和场景，请稍候。"
+          phases={['正在识别情节变化…', '正在整理出场角色与场景…', '正在生成故事段落…']}
+          skeletons={3}
+        />
+        <ActionBar>
+          <Button variant="primary" size="lg" disabled>
+            正在拆解故事…
+          </Button>
+        </ActionBar>
+      </>
+    )
   }
 
   return (
     <div>
-      {/* 工具栏 */}
-      <div className="mb-4 flex items-center gap-3">
-        <Button
-          variant="soft"
-          onClick={() => (st === 'done' ? setRegenOpen(true) : setGenOpen(true))}
-          disabled={st === 'generating'}
-        >
-          {st === 'generating' ? (
-            <>
-              <Spinner size={13} /> 生成中…
-            </>
-          ) : st === 'done' ? (
-            '重新生成'
-          ) : (
-            '生成分段'
-          )}
-        </Button>
-        <StatusPill label="分段状态" status={st} />
-      </div>
+      <PageHeader
+        title="故事拆解"
+        desc={`已将故事拆解为 ${segs.length} 个可独立制作的视频段落。`}
+        right={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setRegenOpen(true)}>
+              重新拆解
+            </Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              ＋ 新增故事段落
+            </Button>
+          </>
+        }
+      />
 
-      {/* 列表标题 */}
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-medium">段列表（{segs.length}）</div>
-        {st === 'done' && (
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            ＋ 新增段
-          </Button>
-        )}
-      </div>
+      <div className="mb-4 text-[13px] text-muted">已生成 {segs.length} 个故事段落</div>
 
-      {/* 三态 */}
-      {st === 'none' && <div className="py-10 text-sm text-faint">还没有分段，先生成。</div>}
-      {st === 'generating' && (
-        <div className="flex items-center gap-2 py-10 text-sm text-muted">
-          <Spinner /> 正在生成剧情分段…
-        </div>
-      )}
-      {st === 'done' && (
-        <div className="overflow-hidden rounded-lg border border-line">
-          <div className="grid grid-cols-[60px_160px_70px_90px_120px_120px_120px_1fr] gap-3 border-b border-line bg-panel2 px-4 py-2.5 text-xs text-muted">
-            {COLS.map((c) => (
-              <div key={c}>{c}</div>
-            ))}
-          </div>
-          {segs.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => setEdit(s)}
-              className="grid cursor-pointer grid-cols-[60px_160px_70px_90px_120px_120px_120px_1fr] gap-3 border-b border-line/60 px-4 py-3 text-sm last:border-0 hover:bg-panel2"
-            >
-              <div>{s.no}</div>
-              <div
-                onClick={(e) => rename === s.id && e.stopPropagation()}
-                onDoubleClick={(e) => { e.stopPropagation(); setRename(s.id) }}
-              >
-                {rename === s.id ? (
-                  <InlineRename
-                    value={s.title}
-                    onCommit={(v) => {
-                      updateSegmentTitle(s.id, v)
-                      setRename(null)
-                    }}
-                  />
-                ) : (
-                  s.title
-                )}
-              </div>
-              <div className="text-muted">{s.dur}</div>
-              <div className="text-faint">{s.scene ?? '—'}</div>
-              <div className="text-faint">{s.roles ?? '—'}</div>
-              <div className="text-faint">{s.action ?? '—'}</div>
-              <div className="text-faint">{s.timeline ?? '—'}</div>
-              <div className="line-clamp-2 text-muted">{s.text}</div>
+      <div className="space-y-3">
+        {segs.map((s) => (
+          <div
+            key={s.id}
+            onClick={() => setEdit(s)}
+            className="group cursor-pointer rounded-xl border border-line/60 bg-panel px-5 py-4 transition-colors hover:border-line hover:bg-panel2"
+          >
+            <div className="flex items-center gap-2 text-xs text-faint">
+              <span className="tabular-nums">{no2(s.no)}</span>
+              <span>·</span>
+              <span>{fmtDur(s.dur)}</span>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="mt-1.5 text-[15px] font-medium">{s.title}</div>
+            <div className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted">{s.text}</div>
 
-      {/* 生成分段弹窗 */}
-      {genOpen && (
-        <Modal
-          title="生成分段"
-          onClose={() => setGenOpen(false)}
-          footer={
-            <>
-              <Button onClick={() => setGenOpen(false)}>取消</Button>
-              <Button variant="primary" onClick={doGen}>
-                确认生成
-              </Button>
-            </>
-          }
-        >
-          <Label>文本模型</Label>
-          <FakeSelect value="灵犀3.1 pro" />
-          <CostRow cost={COST.segGen} balance={project.balance} />
-        </Modal>
-      )}
+            {(s.scene || s.roles) && (
+              <div className="mt-2.5 text-xs text-faint">{[s.scene, s.roles].filter(Boolean).join(' · ')}</div>
+            )}
 
-      {/* 重新生成确认 */}
-      {regenOpen && (
-        <Modal
-          title="重新生成分段"
-          width={380}
-          onClose={() => setRegenOpen(false)}
-          footer={
-            <>
-              <Button onClick={() => setRegenOpen(false)}>取消</Button>
-              <Button variant="primary" onClick={doGen}>
-                消耗 {COST.segGen} 星钻并重新生成
-              </Button>
-            </>
-          }
-        >
-          <div className="text-sm text-muted">重新生成将覆盖现有分段，消耗 {COST.segGen} 星钻。</div>
-        </Modal>
-      )}
+            <div className="mt-3 text-[13px] text-brand opacity-0 transition group-hover:opacity-100">查看详情 ›</div>
+          </div>
+        ))}
+      </div>
 
-      {/* 新增段弹窗 */}
+      <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
+        <Button variant="primary" size="lg" disabled={segs.length === 0} onClick={() => setExtractOpen(true)}>
+          提取角色与场景 · <Diamond />
+          {COST.assetExtract}
+        </Button>
+      </ActionBar>
+
+      {/* 新增故事段落弹窗 */}
       {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
 
-      {/* 编辑段抽屉 */}
+      {/* 段落详情抽屉 */}
       {edit && (
         <EditSegDrawer
           seg={edit}
@@ -169,6 +112,40 @@ export default function Step2Segments({ project }: { project: Project }) {
           onDelete={() => {
             deleteSegment(edit.id)
             setEdit(null)
+          }}
+        />
+      )}
+
+      {/* 提取角色与场景确认 */}
+      {extractOpen && (
+        <GenerateConfirmModal
+          title="确认提取角色与场景"
+          what={`AI 将从 ${segs.length} 个故事段落中识别主要角色和场景。`}
+          model={MODELS.text}
+          cost={COST.assetExtract}
+          balance={project.balance}
+          confirmText="确认并开始提取"
+          onClose={() => setExtractOpen(false)}
+          onConfirm={() => {
+            setExtractOpen(false)
+            startAssets()
+          }}
+        />
+      )}
+
+      {/* 重新拆解确认 */}
+      {regenOpen && (
+        <GenerateConfirmModal
+          title="确认重新拆解故事"
+          what={`重新拆解将覆盖现有的 ${segs.length} 个故事段落，已生成的角色、场景、镜头和视频会被标记为需要重新生成。`}
+          model={MODELS.text}
+          cost={COST.segGen}
+          balance={project.balance}
+          confirmText="确认并重新拆解"
+          onClose={() => setRegenOpen(false)}
+          onConfirm={() => {
+            setRegenOpen(false)
+            generateSegments()
           }}
         />
       )}
@@ -190,7 +167,7 @@ function AddSegModal({
   const ok = title.trim() && text.trim()
   return (
     <Modal
-      title="新增段"
+      title="新增故事段落"
       width={480}
       onClose={onClose}
       footer={
@@ -209,15 +186,15 @@ function AddSegModal({
         </>
       }
     >
-      <Label>段号（自动）</Label>
-      <div className="mb-3 inline-block rounded bg-panel2 px-3 py-1.5 text-sm">{nextNo}</div>
-      <Label req>标题</Label>
-      <Input placeholder="必填，如：苏晚推门对峙" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Label>段落编号（自动）</Label>
+      <div className="mb-3 inline-block rounded bg-panel2 px-3 py-1.5 text-sm tabular-nums">{no2(nextNo)}</div>
+      <Label req>段落标题</Label>
+      <Input placeholder="例如：苏可推门对峙" value={title} onChange={(e) => setTitle(e.target.value)} />
       <div className="h-3" />
-      <Label req>原文</Label>
+      <Label req>故事原文</Label>
       <Textarea
         rows={5}
-        placeholder="必填，填入该段剧本原文，用于后续提取实体/分镜"
+        placeholder="填入该段故事原文，用于后续提取角色与生成镜头"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
@@ -239,72 +216,49 @@ function EditSegDrawer({
   const [title, setTitle] = useState(seg.title)
   const [confirmDel, setConfirmDel] = useState(false)
   const dirty = title.trim() !== seg.title
-  const ro = (v?: string) => (
-    <div className="min-h-[38px] whitespace-pre-line rounded-lg border border-line bg-panel2/50 px-3 py-2 text-sm text-muted">
-      {v && v.length ? v : '—'}
-    </div>
-  )
   return (
     <Drawer
       width={480}
-      header={
-        <div className="text-brand text-[15px] font-semibold">
-          编辑段 #{seg.no} <span className="ml-2 text-xs font-normal text-faint">时长 15s（不可改）</span>
-        </div>
-      }
+      header={<div className="text-brand text-[15px] font-semibold">故事段落 {no2(seg.no)}</div>}
       onClose={onClose}
       footer={
         <>
           <Button variant="danger" size="sm" onClick={() => setConfirmDel(true)}>
-            删除段
+            删除段落
           </Button>
           <div className="flex gap-2">
             <Button onClick={onClose}>取消</Button>
             <Button variant="primary" disabled={!dirty} onClick={() => onSave(title)}>
-              保存
+              保存修改
             </Button>
           </div>
         </>
       }
     >
-      <Label req>标题</Label>
+      <Label req>段落标题</Label>
       <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="mt-4 space-y-1">
-        <Label>原文（只读）</Label>
-        {ro(seg.text)}
-      </div>
-      <div className="mt-4 space-y-1">
-        <Label>场景（只读）</Label>
-        {ro(seg.scene)}
-      </div>
-      <div className="mt-4 space-y-1">
-        <Label>出场角色（只读）</Label>
-        {ro(seg.roles)}
-      </div>
-      <div className="mt-4 space-y-1">
-        <Label>核心动作（只读）</Label>
-        {ro(seg.action)}
-      </div>
-      <div className="mt-4 space-y-1">
-        <Label>时间线（只读）</Label>
-        {ro(seg.timeline)}
-      </div>
+      <div className="h-4" />
+      <ReadonlyField label="故事原文" value={seg.text} />
+      <ReadonlyField label="场景" value={seg.scene} />
+      <ReadonlyField label="出场角色" value={seg.roles} />
+      <ReadonlyField label="主要动作" value={seg.action} />
+      <ReadonlyField label="时间安排" value={seg.timeline} />
 
       {confirmDel && (
         <Modal
-          title="删除段"
-          width={360}
+          title="删除段落"
+          width={380}
           onClose={() => setConfirmDel(false)}
           footer={
             <>
               <Button onClick={() => setConfirmDel(false)}>取消</Button>
-              <Button variant="primary" onClick={onDelete}>
-                确认
+              <Button variant="danger-solid" onClick={onDelete}>
+                删除段落
               </Button>
             </>
           }
         >
-          <div className="text-sm">确定删除「{seg.title}」？</div>
+          <div className="text-sm text-white/85">确定删除「{seg.title}」吗？删除后无法恢复。</div>
         </Modal>
       )}
     </Drawer>

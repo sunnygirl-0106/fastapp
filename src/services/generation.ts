@@ -1,11 +1,18 @@
 // mock 生成/计费服务 —— 唯一替换点：日后把 delay() 换成真实 API 请求即可
 
 export const COST = {
-  segGen: 50, // 生成分段
-  assetExtract: 250, // 提取资产
-  assetImgEach: 55, // 单张参考图
-  shotGenEach: 50, // 每条分镜
-  videoEach: 2363, // 每段视频（3 段 = 7089，与截图一致）
+  segGen: 50, // 拆解故事           → ✦50
+  assetExtract: 250, // 提取角色与场景     → ✦250
+  assetImgEach: 55, // 单张参考图         → 3 张 = ✦165
+  shotGenEach: 50, // 每段镜头           → 3 段 = ✦150
+  videoEach: 2363, // 每段视频           → 3 段 = ✦7,089
+} as const
+
+// 模型名集中管理，所有确认弹窗统一引用
+export const MODELS = {
+  text: '灵犀 3.1 Pro',
+  image: 'Phan Image 2',
+  video: 'Seedance 2.0',
 } as const
 
 export function delay(ms: number): Promise<void> {

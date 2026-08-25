@@ -46,6 +46,7 @@ export interface VideoVersion {
 export interface ShotVideo {
   state: GenStatus
   versions: VideoVersion[]
+  stale?: boolean // 镜头被重新生成后，旧视频标记为需重新生成
 }
 
 export interface Shot {
@@ -80,24 +81,33 @@ export interface Project {
   segments: Segment[]
   assets: Asset[]
   shots: Shot[]
+  assetStale?: boolean // 故事重新拆解后 → 角色与场景需重新提取
+  shotStale?: boolean // 拆解或角色场景变更后 → 镜头需重新生成
 }
 
 // 分镜字段的中文标签与分组（编辑抽屉/快照复用）
 export const SHOT_FIELDS: { key: keyof Shot; label: string }[] = [
-  { key: 'shot', label: '镜头' },
-  { key: 'timeline', label: '时间线' },
-  { key: 'action', label: '核心动作' },
-  { key: 'anchor', label: '空间锚点' },
-  { key: 'motion', label: '运动规则' },
-  { key: 'blocking', label: '走位' },
-  { key: 'continuity', label: '连续性锁' },
-  { key: 'subject', label: '绝对主体' },
-  { key: 'forbid', label: '禁止变更' },
-  { key: 'background', label: '背景边界' },
+  { key: 'shot', label: '画面描述' },
+  { key: 'timeline', label: '时间安排' },
+  { key: 'action', label: '主要动作' },
+  { key: 'anchor', label: '场景位置' },
+  { key: 'motion', label: '动作说明' },
+  { key: 'blocking', label: '人物位置' },
+  { key: 'continuity', label: '连贯要求' },
+  { key: 'subject', label: '画面主角' },
+  { key: 'forbid', label: '保持不变' },
+  { key: 'background', label: '背景范围' },
 ]
 
 export const SHOT_GROUPS: { title: string; fields: (keyof Shot)[] }[] = [
-  { title: '镜头与节奏', fields: ['shot', 'timeline', 'action'] },
-  { title: '空间与运动', fields: ['anchor', 'motion', 'blocking'] },
-  { title: '一致性约束', fields: ['continuity', 'subject', 'forbid', 'background'] },
+  { title: '画面与节奏', fields: ['shot', 'timeline', 'action'] },
+  { title: '人物与空间', fields: ['anchor', 'motion', 'blocking'] },
+  { title: '画面一致性', fields: ['continuity', 'subject', 'forbid', 'background'] },
+]
+
+// Step4 主列表只铺开这三项，其余全部收进「镜头详情」
+export const SHOT_PRIMARY_FIELDS: { key: keyof Shot; label: string }[] = [
+  { key: 'shot', label: '画面' },
+  { key: 'action', label: '人物动作' },
+  { key: 'anchor', label: '场景位置' },
 ]

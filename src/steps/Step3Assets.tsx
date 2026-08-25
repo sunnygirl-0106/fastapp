@@ -1,23 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { COST } from '@/services/generation'
+import { COST, MODELS } from '@/services/generation'
 import {
+  ActionBar,
   Button,
-  CostRow,
   Diamond,
-  FakeSelect,
-  Input,
+  GenerateConfirmModal,
+  GeneratingState,
   Label,
   MenuItem,
   Modal,
+  PageHeader,
   Popover,
+  RefPlaceholder,
   Spinner,
-  StatusPill,
+  StaleNotice,
   Textarea,
   fmt,
 } from '@/components/ui'
 import Lightbox from '@/components/Lightbox'
+import GenShotModal from './GenShotModal'
 
 const importanceCn = (a: Asset) => {
   const map: Record<string, string> = {
@@ -32,7 +35,7 @@ const importanceCn = (a: Asset) => {
 }
 
 export default function Step3Assets({ project }: { project: Project }) {
-  const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset } = useStore()
+  const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots } = useStore()
   const st = project.assetStatus
   const chars = project.assets.filter((a) => a.kind === 'char')
   const scenes = project.assets.filter((a) => a.kind === 'scene')
@@ -40,142 +43,123 @@ export default function Step3Assets({ project }: { project: Project }) {
   const missChars = missing.filter((a) => a.kind === 'char').length
   const missScenes = missing.filter((a) => a.kind === 'scene').length
 
-  const [extractOpen, setExtractOpen] = useState(false)
   const [reextract, setReextract] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [genFor, setGenFor] = useState<Asset | null>(null)
   const [editFor, setEditFor] = useState<Asset | null>(null)
   const [lightbox, setLightbox] = useState<Asset | null>(null)
+  const [shotOpen, setShotOpen] = useState(false)
   const [menu, setMenu] = useState<{ a: Asset; top: number; left: number } | null>(null)
 
-  const doExtract = async () => {
-    setExtractOpen(false)
-    setReextract(false)
-    await extractAssets()
+  if (st === 'generating') {
+    return (
+      <>
+        <GeneratingState
+          title="正在识别角色与场景"
+          desc="AI 正在从故事中整理人物设定和主要场景。"
+          phases={['正在识别主要角色…', '正在整理人物设定…', '正在提取故事场景…']}
+        />
+        <ActionBar>
+          <Button variant="primary" size="lg" disabled>
+            正在提取角色与场景…
+          </Button>
+        </ActionBar>
+      </>
+    )
   }
 
   return (
     <div>
-      {/* 工具栏 */}
-      <div className="mb-4 flex items-center gap-3">
-        <Button
-          variant="soft"
-          disabled={st === 'generating'}
-          onClick={() => (st === 'done' ? setReextract(true) : setExtractOpen(true))}
-        >
-          {st === 'generating' ? (
-            <>
-              <Spinner size={13} /> 提取中…
-            </>
-          ) : st === 'done' ? (
-            '重新提取'
-          ) : (
-            '提取资产'
-          )}
-        </Button>
-        <StatusPill label="提取状态" status={st} />
+      <PageHeader
+        title="角色与场景"
+        desc={`已识别 ${chars.length} 个角色和 ${scenes.length} 个场景。完善参考图，可以让后续画面更加一致。`}
+        right={
+          <Button variant="ghost" size="sm" onClick={() => setReextract(true)}>
+            重新提取
+          </Button>
+        }
+      />
+
+      {project.assetStale && (
+        <StaleNotice
+          text="故事已重新拆解，建议重新提取角色与场景。"
+          actionText="重新提取"
+          onAction={() => setReextract(true)}
+        />
+      )}
+
+      <div className="mb-4 text-[13px] text-muted">
+        已识别 {chars.length} 个角色 · {scenes.length} 个场景
       </div>
 
-      {st === 'none' && (
-        <>
-          <Group title="角色（0）">
-            <div className="text-sm text-faint">暂无实体，请先抽出结构。</div>
-          </Group>
-          <Group title="场景（0）">
-            <div className="text-sm text-faint">暂无实体，请先抽出结构。</div>
-          </Group>
-        </>
-      )}
-
-      {st === 'generating' && (
-        <div className="flex items-center gap-2 py-10 text-sm text-muted">
-          <Spinner /> 正在抽出角色与场景结构…
+      <Group title="角色">
+        <div className="flex flex-wrap gap-4">
+          {chars.map((a) => (
+            <AssetCard
+              key={a.id}
+              a={a}
+              onImage={() => onImageClick(a)}
+              onZoom={() => setLightbox(a)}
+              onMenu={(e) => openMenu(a, e)}
+              onEdit={() => setEditFor(a)}
+            />
+          ))}
         </div>
+      </Group>
+
+      <Group title="场景">
+        <div className="flex flex-wrap gap-4">
+          {scenes.map((a) => (
+            <AssetCard
+              key={a.id}
+              a={a}
+              onImage={() => onImageClick(a)}
+              onZoom={() => setLightbox(a)}
+              onMenu={(e) => openMenu(a, e)}
+              onEdit={() => setEditFor(a)}
+            />
+          ))}
+        </div>
+      </Group>
+
+      {/* 底部主操作栏：两种形态 */}
+      {missing.length > 0 ? (
+        <ActionBar left={`共 ${missing.length} 张参考图，每张 ${COST.assetImgEach} 星钻`}>
+          <button className="text-[13px] text-muted hover:text-white" onClick={() => setShotOpen(true)}>
+            跳过参考图，继续生成镜头
+          </button>
+          <Button variant="primary" size="lg" onClick={() => setBatchOpen(true)}>
+            生成全部参考图 · <Diamond />
+            {fmt(missing.length * COST.assetImgEach)}
+          </Button>
+        </ActionBar>
+      ) : (
+        <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
+          <Button variant="primary" size="lg" onClick={() => setShotOpen(true)}>
+            生成镜头设计 · <Diamond />
+            {fmt(project.segments.length * COST.shotGenEach)}
+          </Button>
+        </ActionBar>
       )}
 
-      {st === 'done' && (
-        <>
-          {missing.length > 0 && (
-            <div className="mb-4 flex items-center gap-3">
-              <Button variant="soft" onClick={() => setBatchOpen(true)}>
-                一键补全参考图
-              </Button>
-              <span className="text-xs text-muted">
-                {missChars} 角色 + {missScenes} 场景 待生成 · 决定画面统一度
-              </span>
-            </div>
-          )}
-
-          <Group title={`角色（${chars.length}）`}>
-            <div className="flex flex-wrap gap-4">
-              {chars.map((a) => (
-                <AssetCard
-                  key={a.id}
-                  a={a}
-                  onImage={() => onImageClick(a)}
-                  onZoom={() => setLightbox(a)}
-                  onMenu={(e) => openMenu(a, e)}
-                  onName={() => setEditFor(a)}
-                />
-              ))}
-            </div>
-          </Group>
-
-          <Group title={`场景（${scenes.length}）`}>
-            <div className="flex flex-wrap gap-4">
-              {scenes.map((a) => (
-                <AssetCard
-                  key={a.id}
-                  a={a}
-                  onImage={() => onImageClick(a)}
-                  onZoom={() => setLightbox(a)}
-                  onMenu={(e) => openMenu(a, e)}
-                  onName={() => setEditFor(a)}
-                />
-              ))}
-            </div>
-          </Group>
-        </>
-      )}
-
-      {/* 提取弹窗 */}
-      {extractOpen && (
-        <Modal
-          title="确认生成：抽出结构"
-          onClose={() => setExtractOpen(false)}
-          footer={
-            <>
-              <Button onClick={() => setExtractOpen(false)}>取消</Button>
-              <Button variant="primary" onClick={doExtract}>
-                确认生成
-              </Button>
-            </>
-          }
-        >
-          <Label>文本模型</Label>
-          <FakeSelect value="灵犀3.1 pro" />
-          <CostRow cost={COST.assetExtract} balance={project.balance} />
-        </Modal>
-      )}
-
+      {/* 重新提取确认 */}
       {reextract && (
-        <Modal
-          title="重新提取"
-          width={380}
+        <GenerateConfirmModal
+          title="确认重新提取角色与场景"
+          what="重新提取将重建角色与场景列表；已生成的参考图会尽量保留，下游镜头和视频会被标记为需要重新生成。"
+          model={MODELS.text}
+          cost={COST.assetExtract}
+          balance={project.balance}
+          confirmText="确认并重新提取"
           onClose={() => setReextract(false)}
-          footer={
-            <>
-              <Button onClick={() => setReextract(false)}>取消</Button>
-              <Button variant="primary" onClick={doExtract}>
-                消耗 {COST.assetExtract} 星钻并重新提取
-              </Button>
-            </>
-          }
-        >
-          <div className="text-sm text-muted">重新提取将重建角色/场景列表；已生成的参考图会尽量保留。</div>
-        </Modal>
+          onConfirm={() => {
+            setReextract(false)
+            extractAssets()
+          }}
+        />
       )}
 
+      {/* 批量生成参考图 */}
       {batchOpen && (
         <BatchModal
           assets={missing}
@@ -188,12 +172,19 @@ export default function Step3Assets({ project }: { project: Project }) {
         />
       )}
 
+      {/* 单张生成参考图 */}
       {genFor && (
-        <GenImageModal
-          a={genFor}
+        <GenerateConfirmModal
+          title={`生成${genFor.kind === 'char' ? '角色' : '场景'}参考图`}
+          what={`将为「${genFor.name}」生成一张参考图。`}
+          count="1 张参考图"
+          modelLabel="图片模型"
+          model={MODELS.image}
+          cost={COST.assetImgEach}
           balance={project.balance}
+          confirmText="确认生成参考图"
           onClose={() => setGenFor(null)}
-          onGen={async () => {
+          onConfirm={async () => {
             const id = genFor.id
             setGenFor(null)
             await generateAssetImages([id])
@@ -201,8 +192,9 @@ export default function Step3Assets({ project }: { project: Project }) {
         />
       )}
 
+      {/* 编辑设定 */}
       {editFor && (
-        <EditDescModal
+        <EditSettingModal
           a={editFor}
           onClose={() => setEditFor(null)}
           onSave={(patch) => {
@@ -214,25 +206,37 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {lightbox && <Lightbox title={lightbox.name} url={lightbox.imageUrl} onClose={() => setLightbox(null)} />}
 
+      {/* 生成镜头设计弹窗（与 Step4 共用） */}
+      {shotOpen && (
+        <GenShotModal
+          project={project}
+          onClose={() => setShotOpen(false)}
+          onConfirm={(segNos) => {
+            setShotOpen(false)
+            startShots(segNos)
+          }}
+        />
+      )}
+
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
-            选择图片
+            上传参考图
           </MenuItem>
           <MenuItem onClick={() => { setGenFor(menu.a); setMenu(null) }}>
-            AI 生{menu.a.kind === 'char' ? '角色' : '场景'}
+            生成参考图
           </MenuItem>
           <MenuItem
             disabled={menu.a.imgState !== 'done'}
             onClick={() => { useStore.getState().showToast('已开始下载（示意）'); setMenu(null) }}
           >
-            下载
+            下载参考图
           </MenuItem>
           <MenuItem
             disabled={menu.a.imgState !== 'done'}
             onClick={() => { clearAssetImage(menu.a.id); setMenu(null) }}
           >
-            清除图片
+            清除参考图
           </MenuItem>
           <MenuItem danger onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
             删除{menu.a.kind === 'char' ? '角色' : '场景'}
@@ -244,7 +248,8 @@ export default function Step3Assets({ project }: { project: Project }) {
 
   function onImageClick(a: Asset) {
     if (a.imgState === 'generating') return
-    setEditFor(a) // 点图（无论有无图）→ 打开编辑描述；看大图走右上角放大镜
+    if (a.imgState === 'done') setLightbox(a) // 有图看大图
+    else setGenFor(a) // 无图打开单张生成弹窗
   }
   function openMenu(a: Asset, e: React.MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -266,29 +271,30 @@ function AssetCard({
   onImage,
   onZoom,
   onMenu,
-  onName,
+  onEdit,
 }: {
   a: Asset
   onImage: () => void
   onZoom: () => void
   onMenu: (e: React.MouseEvent) => void
-  onName: () => void
+  onEdit: () => void
 }) {
   const done = a.imgState === 'done'
   return (
     <div className="w-[236px]">
       <div
         onClick={onImage}
-        title="点击编辑描述"
-        className="group relative flex h-[150px] cursor-pointer items-center justify-center rounded-lg border border-line bg-panel2 bg-cover bg-center text-xs text-faint"
+        className="group relative h-[150px] cursor-pointer overflow-hidden rounded-lg border border-line bg-cover bg-center"
         style={{ backgroundImage: a.imageUrl ? `url("${a.imageUrl}")` : undefined }}
       >
+        {a.imgState === 'none' && <RefPlaceholder kind={a.kind} />}
         {a.imgState === 'generating' && (
-          <span className="inline-flex items-center gap-2 text-muted">
-            <Spinner size={13} /> 生成中…
-          </span>
+          <div className="skeleton flex h-full items-center justify-center">
+            <span className="inline-flex items-center gap-2 text-xs text-muted">
+              <Spinner size={13} /> 正在生成参考图…
+            </span>
+          </div>
         )}
-        {a.imgState === 'none' && <span>生成或上传{a.kind === 'char' ? '角色' : '场景'}图</span>}
 
         <div className="absolute right-2 top-2 flex items-center gap-1">
           {done && (
@@ -309,10 +315,17 @@ function AssetCard({
           </button>
         </div>
       </div>
-      <button className="mt-2 flex items-center gap-1 text-sm text-brand hover:underline" onClick={onName}>
-        {a.name} <span className="text-[11px] text-muted">✎</span>
-      </button>
-      <div className="mt-0.5 line-clamp-1 text-xs text-faint">{a.desc}</div>
+
+      <div className="mt-2 text-sm font-medium text-white">{a.name}</div>
+      <div className="mt-0.5 text-xs text-faint">{a.kind === 'char' ? importanceCn(a) : '场景'}</div>
+      <div className="mt-1 line-clamp-2 text-xs text-muted">{a.desc}</div>
+
+      <div className="mt-2 flex items-center gap-3 text-[13px]">
+        <button className="text-brand hover:underline" onClick={onEdit}>
+          编辑设定
+        </button>
+        {done && <span className="text-xs text-faint">参考图已生成</span>}
+      </div>
     </div>
   )
 }
@@ -335,70 +348,6 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
   )
 }
 
-function GenImageModal({
-  a,
-  balance,
-  onClose,
-  onGen,
-}: {
-  a: Asset
-  balance: number
-  onClose: () => void
-  onGen: () => void
-}) {
-  const [prompt, setPrompt] = useState(a.prompt)
-  const [res, setRes] = useState('1K')
-  const [calc, setCalc] = useState(true)
-  useEffect(() => {
-    const t = setTimeout(() => setCalc(false), 600)
-    return () => clearTimeout(t)
-  }, [])
-  return (
-    <Modal
-      title={`AI 生${a.kind === 'char' ? '角色' : '场景'}（${a.name}）`}
-      width={720}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" disabled={calc} onClick={onGen}>
-            确认生成{!calc && ` · ✦${COST.assetImgEach}`}
-          </Button>
-        </>
-      }
-    >
-      <Textarea rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="mt-4 flex items-end gap-6">
-        <div>
-          <Label>图片模型</Label>
-          <div className="w-40">
-            <FakeSelect value="phan image2" />
-          </div>
-        </div>
-        <div>
-          <Label>画面比例</Label>
-          <div className="rounded-lg border border-line px-3 py-1 text-sm text-muted">1:1</div>
-        </div>
-        <div>
-          <Label>分辨率</Label>
-          <ResChips value={res} onChange={setRes} />
-        </div>
-        <div className="ml-auto pb-1 text-[13px] text-muted">
-          {calc ? (
-            <span className="inline-flex items-center gap-2">
-              <Spinner size={12} /> 合计预估中…
-            </span>
-          ) : (
-            <span>
-              <Diamond /> <span className="text-white">{COST.assetImgEach}</span> · 余额 {fmt(balance)}
-            </span>
-          )}
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
 function BatchModal({
   assets,
   balance,
@@ -413,48 +362,54 @@ function BatchModal({
   const [sel, setSel] = useState<string[]>(assets.map((a) => a.id))
   const [res, setRes] = useState('1K')
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-  const cost = sel.length * COST.assetImgEach
+  const nChar = assets.filter((a) => a.kind === 'char').length
+  const nScene = assets.filter((a) => a.kind === 'scene').length
+  const what = `将为 ${nChar} 个角色和 ${nScene} 个场景生成参考图。`
+
   return (
-    <Modal
-      title="一键补全参考图"
-      width={720}
+    <GenerateConfirmModal
+      title="生成参考图"
+      what={what}
+      count={`${sel.length} 张参考图`}
+      modelLabel="图片模型"
+      model={MODELS.image}
+      cost={sel.length * COST.assetImgEach}
+      balance={balance}
+      confirmText={`确认生成 ${sel.length} 张参考图`}
+      disabled={!sel.length}
+      width={520}
       onClose={onClose}
-      footer={
-        <div className="flex w-full items-center justify-between">
-          <span className="text-[13px] text-muted">
-            已选 {sel.length}/{assets.length} · 合计预计消耗 <span className="text-white">{fmt(cost)}</span> 星钻（{sel.length} 张）· 余额 {fmt(balance)}
-          </span>
-          <Button variant="primary" disabled={!sel.length} onClick={() => onGen(sel)}>
-            生成（{sel.length}）
-          </Button>
+      onConfirm={() => onGen(sel)}
+      extra={
+        <div>
+          <div className="mb-2 text-[13px] text-muted">
+            已选择 {sel.length}/{assets.length}
+          </div>
+          <div className="max-h-[240px] space-y-2 overflow-y-auto">
+            {assets.map((a) => (
+              <label
+                key={a.id}
+                className="flex items-center gap-2 rounded-lg border border-line/60 bg-panel2/50 px-3 py-2 text-[13px]"
+              >
+                <input type="checkbox" checked={sel.includes(a.id)} onChange={() => toggle(a.id)} className="accent-brand" />
+                <span className="text-white">{a.name}</span>
+                <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">
+                  {a.kind === 'char' ? '角色' : '场景'}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-4">
+            <span className="text-[13px] text-muted">分辨率</span>
+            <ResChips value={res} onChange={setRes} />
+          </div>
         </div>
       }
-    >
-      <div className="max-h-[360px] space-y-4 overflow-y-auto">
-        {assets.map((a) => (
-          <div key={a.id} className="rounded-lg border border-line p-3">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={sel.includes(a.id)} onChange={() => toggle(a.id)} className="accent-brand" />
-              <span className="text-brand">{a.name}</span>
-              <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">
-                {a.kind === 'char' ? '角色' : '场景'}
-              </span>
-            </label>
-            <div className="mt-2 line-clamp-3 rounded border border-line/60 bg-panel2/50 px-2.5 py-2 text-xs text-muted">
-              {a.prompt}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-4">
-        <span className="text-[13px] text-muted">分辨率</span>
-        <ResChips value={res} onChange={setRes} />
-      </div>
-    </Modal>
+    />
   )
 }
 
-function EditDescModal({
+function EditSettingModal({
   a,
   onClose,
   onSave,
@@ -465,31 +420,34 @@ function EditDescModal({
 }) {
   const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
+  const isChar = a.kind === 'char'
   return (
     <Modal
-      title={`编辑描述（${a.name}）`}
-      width={720}
+      title={isChar ? '编辑角色设定' : '编辑场景设定'}
+      width={640}
       onClose={onClose}
       footer={
         <>
           <Button onClick={onClose}>取消</Button>
           <Button variant="primary" onClick={() => onSave({ desc, prompt })}>
-            保存
+            保存修改
           </Button>
         </>
       }
     >
-      <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-muted">
-        {a.kind === 'char' && <span>角色定位：{importanceCn(a)}</span>}
-        <span>别名：{a.alias?.trim() ? a.alias : '暂无'}</span>
-        {a.kind === 'scene' && a.belongSegs && <span>出现在第 {a.belongSegs.join('、')} 段</span>}
-        {a.kind === 'scene' && a.roles && <span>出场角色：{a.roles.join('、')}</span>}
-      </div>
-      <Label>描述</Label>
+      {isChar && (
+        <div className="mb-4 flex items-center gap-2 text-[13px]">
+          <span className="text-muted">角色名称：</span>
+          <span className="text-white">{a.name}</span>
+          <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">{importanceCn(a)}</span>
+        </div>
+      )}
+      <Label>{isChar ? '角色描述' : '场景描述'}</Label>
       <Textarea rows={5} value={desc} onChange={(e) => setDesc(e.target.value)} />
       <div className="h-3" />
-      <Label>图像提示词</Label>
+      <Label>参考图描述</Label>
       <Textarea rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <div className="mt-1 text-[12px] text-faint">将用于生成{isChar ? '角色' : '场景'}参考图</div>
     </Modal>
   )
 }

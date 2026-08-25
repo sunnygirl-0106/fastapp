@@ -3,6 +3,7 @@ import type { Project, Shot } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { Button, Drawer, Modal, Textarea } from '@/components/ui'
+import { no2 } from '@/utils/project'
 
 const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? k
 
@@ -58,7 +59,7 @@ export default function ShotEditDrawer({
       width={640}
       header={
         <div className="flex items-center gap-3">
-          <span className="text-brand text-[15px] font-semibold">编辑分镜 #{shot.no}</span>
+          <span className="text-brand text-[15px] font-semibold">镜头详情 {no2(shot.no)}</span>
           <div className="flex items-center gap-1 text-xs text-muted">
             <button className="px-1 hover:text-white disabled:opacity-30" disabled={idx === 0} onClick={() => gotoIndex(idx - 1)}>
               ‹ 上一段
@@ -80,12 +81,12 @@ export default function ShotEditDrawer({
       footer={
         <>
           <Button variant="danger" size="sm" onClick={() => setConfirmDel(true)}>
-            删除分镜
+            删除镜头
           </Button>
           <div className="flex gap-2">
             <Button onClick={tryClose}>关闭</Button>
             <Button variant="primary" disabled={!dirty} onClick={() => { save(); onClose() }}>
-              保存
+              保存修改
             </Button>
           </div>
         </>
@@ -112,19 +113,19 @@ export default function ShotEditDrawer({
 
       {confirmDel && (
         <Modal
-          title="删除分镜"
-          width={360}
+          title="删除镜头"
+          width={380}
           onClose={() => setConfirmDel(false)}
           footer={
             <>
               <Button onClick={() => setConfirmDel(false)}>取消</Button>
-              <Button variant="primary" onClick={() => { deleteShot(curId); onClose() }}>
-                确认
+              <Button variant="danger-solid" onClick={() => { deleteShot(curId); onClose() }}>
+                删除镜头
               </Button>
             </>
           }
         >
-          <div className="text-sm">确定删除分镜 #{shot.no}？</div>
+          <div className="text-sm text-white/85">确定删除镜头 {no2(shot.no)} 吗？删除后无法恢复。</div>
         </Modal>
       )}
 
