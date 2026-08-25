@@ -20,7 +20,7 @@ export default function Workflow() {
       <WorkflowTopBar name={project.name} balance={project.balance} onBack={back} />
       <StepBar project={project} />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-8 py-4">
+      <main className="mx-auto w-full max-w-[1680px] flex-1 px-6 py-4 lg:px-10 2xl:px-14">
         {step === 1 && <Step1Script project={project} />}
         {step === 2 && <Step2Segments project={project} />}
         {step === 3 && <Step3Assets project={project} />}

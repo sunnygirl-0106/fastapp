@@ -122,7 +122,7 @@ export default function ProjectList() {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
-          <div className="mt-2 text-[13px] text-faint">创建后将从添加故事内容开始。</div>
+          <div className="mt-2 text-[13px] text-faint">创建后将从添加剧本内容开始。</div>
         </Modal>
       )}
 

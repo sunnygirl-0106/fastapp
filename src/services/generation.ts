@@ -15,6 +15,13 @@ export const MODELS = {
   video: 'Seedance 2.0',
 } as const
 
+// 各类型可选模型列表（确认弹窗中的下拉选择）
+export const MODEL_OPTIONS = {
+  text: ['灵犀 3.1 Pro', '灵犀 3.1 Flash', 'DeepSeek V3', 'GPT-4o'],
+  image: ['Phan Image 2', 'Phan Image 1.5', 'Seedream 3.0'],
+  video: ['Seedance 2.0', 'Seedance 1.5', 'Kling 2.1'],
+} as const
+
 export function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }

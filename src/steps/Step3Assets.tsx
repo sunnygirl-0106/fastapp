@@ -8,12 +8,12 @@ import {
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
+  InlineRename,
   Label,
   MenuItem,
   Modal,
   PageHeader,
   Popover,
-  RefPlaceholder,
   Spinner,
   StaleNotice,
   Textarea,
@@ -21,18 +21,6 @@ import {
 } from '@/components/ui'
 import Lightbox from '@/components/Lightbox'
 import GenShotModal from './GenShotModal'
-
-const importanceCn = (a: Asset) => {
-  const map: Record<string, string> = {
-    major: '主角',
-    main: '主角',
-    lead: '主角',
-    supporting: '配角',
-    minor: '次要角色',
-    background: '背景角色',
-  }
-  return map[a.importance as string] ?? '配角'
-}
 
 export default function Step3Assets({ project }: { project: Project }) {
   const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots } = useStore()
@@ -46,18 +34,19 @@ export default function Step3Assets({ project }: { project: Project }) {
   const [reextract, setReextract] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [genFor, setGenFor] = useState<Asset | null>(null)
-  const [editFor, setEditFor] = useState<Asset | null>(null)
+  const [editFor, setEditFor] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<Asset | null>(null)
   const [shotOpen, setShotOpen] = useState(false)
   const [menu, setMenu] = useState<{ a: Asset; top: number; left: number } | null>(null)
+  const [tab, setTab] = useState<'char' | 'scene'>('char')
 
   if (st === 'generating') {
     return (
       <>
         <GeneratingState
           title="正在识别角色与场景"
-          desc="AI 正在从故事中整理人物设定和主要场景。"
-          phases={['正在识别主要角色…', '正在整理人物设定…', '正在提取故事场景…']}
+          desc="AI 正在从剧本中整理人物设定和主要场景。"
+          phases={['正在识别主要角色…', '正在整理人物设定…', '正在提取剧本场景…']}
         />
         <ActionBar>
           <Button variant="primary" size="lg" disabled>
@@ -72,7 +61,7 @@ export default function Step3Assets({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="角色与场景"
-        desc={`已识别 ${chars.length} 个角色和 ${scenes.length} 个场景。完善参考图，可以让后续画面更加一致。`}
+        desc="完善角色与场景的设定和参考图，可以让后续画面更加一致。"
         right={
           <Button variant="ghost" size="sm" onClick={() => setReextract(true)}>
             重新提取
@@ -82,45 +71,34 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {project.assetStale && (
         <StaleNotice
-          text="故事已重新拆解，建议重新提取角色与场景。"
+          text="剧本已重新拆解，建议重新提取角色与场景。"
           actionText="重新提取"
           onAction={() => setReextract(true)}
         />
       )}
 
-      <div className="mb-4 text-[13px] text-muted">
-        已识别 {chars.length} 个角色 · {scenes.length} 个场景
+      {/* 角色 / 场景 分栏切换 */}
+      <div className="mb-5 flex items-center gap-6 border-b border-line/60">
+        <TabButton label="角色" count={chars.length} active={tab === 'char'} onClick={() => setTab('char')} />
+        <TabButton label="场景" count={scenes.length} active={tab === 'scene'} onClick={() => setTab('scene')} />
       </div>
 
-      <Group title="角色">
-        <div className="flex flex-wrap gap-4">
-          {chars.map((a) => (
-            <AssetCard
-              key={a.id}
-              a={a}
-              onImage={() => onImageClick(a)}
-              onZoom={() => setLightbox(a)}
-              onMenu={(e) => openMenu(a, e)}
-              onEdit={() => setEditFor(a)}
-            />
-          ))}
-        </div>
-      </Group>
-
-      <Group title="场景">
-        <div className="flex flex-wrap gap-4">
-          {scenes.map((a) => (
-            <AssetCard
-              key={a.id}
-              a={a}
-              onImage={() => onImageClick(a)}
-              onZoom={() => setLightbox(a)}
-              onMenu={(e) => openMenu(a, e)}
-              onEdit={() => setEditFor(a)}
-            />
-          ))}
-        </div>
-      </Group>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        {(tab === 'char' ? chars : scenes).map((a) => (
+          <AssetCard
+            key={a.id}
+            a={a}
+            onZoom={() => setLightbox(a)}
+            onMenu={(e) => openMenu(a, e)}
+            onEdit={() => setEditFor(a.id)}
+          />
+        ))}
+        {(tab === 'char' ? chars : scenes).length === 0 && (
+          <div className="col-span-full py-16 text-center text-[13px] text-faint">
+            暂无{tab === 'char' ? '角色' : '场景'}
+          </div>
+        )}
+      </div>
 
       {/* 底部主操作栏：两种形态 */}
       {missing.length > 0 ? (
@@ -192,17 +170,19 @@ export default function Step3Assets({ project }: { project: Project }) {
         />
       )}
 
-      {/* 编辑设定 */}
-      {editFor && (
-        <EditSettingModal
-          a={editFor}
-          onClose={() => setEditFor(null)}
-          onSave={(patch) => {
-            updateAsset(editFor.id, patch)
-            setEditFor(null)
-          }}
-        />
-      )}
+      {/* 编辑设定：居中弹窗 */}
+      {editFor &&
+        (() => {
+          const a = project.assets.find((x) => x.id === editFor)
+          if (!a) return null
+          return (
+            <AssetSettingModal
+              a={a}
+              onClose={() => setEditFor(null)}
+              onSave={(patch) => updateAsset(a.id, patch)}
+            />
+          )
+        })()}
 
       {lightbox && <Lightbox title={lightbox.name} url={lightbox.imageUrl} onClose={() => setLightbox(null)} />}
 
@@ -221,10 +201,10 @@ export default function Step3Assets({ project }: { project: Project }) {
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
-            上传参考图
+            选择图片
           </MenuItem>
           <MenuItem onClick={() => { setGenFor(menu.a); setMenu(null) }}>
-            生成参考图
+            AI 生成单张图片
           </MenuItem>
           <MenuItem
             disabled={menu.a.imgState !== 'done'}
@@ -246,85 +226,110 @@ export default function Step3Assets({ project }: { project: Project }) {
     </div>
   )
 
-  function onImageClick(a: Asset) {
-    if (a.imgState === 'generating') return
-    if (a.imgState === 'done') setLightbox(a) // 有图看大图
-    else setGenFor(a) // 无图打开单张生成弹窗
-  }
   function openMenu(a: Asset, e: React.MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setMenu({ a, top: r.bottom + 4, left: r.left - 150 })
   }
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+function TabButton({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string
+  count: number
+  active: boolean
+  onClick: () => void
+}) {
   return (
-    <section className="mb-8">
-      <div className="mb-3 text-sm font-medium">{title}</div>
-      {children}
-    </section>
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 pb-2.5 text-[15px] transition-colors ${
+        active ? 'border-brand font-semibold text-white' : 'border-transparent text-muted hover:text-white'
+      }`}
+    >
+      {label}
+      <span className={`ml-1 text-[13px] ${active ? 'text-brand' : 'text-faint'}`}>（{count}）</span>
+    </button>
   )
 }
 
 function AssetCard({
   a,
-  onImage,
   onZoom,
   onMenu,
   onEdit,
 }: {
   a: Asset
-  onImage: () => void
   onZoom: () => void
   onMenu: (e: React.MouseEvent) => void
   onEdit: () => void
 }) {
   const done = a.imgState === 'done'
+  const typeCn = a.kind === 'char' ? '角色' : '场景'
+  const statusCn = done ? '已生成' : a.imgState === 'generating' ? '生成中' : '待生成'
   return (
-    <div className="w-[236px]">
-      <div
-        onClick={onImage}
-        className="group relative h-[150px] cursor-pointer overflow-hidden rounded-lg border border-line bg-cover bg-center"
-        style={{ backgroundImage: a.imageUrl ? `url("${a.imageUrl}")` : undefined }}
-      >
-        {a.imgState === 'none' && <RefPlaceholder kind={a.kind} />}
-        {a.imgState === 'generating' && (
-          <div className="skeleton flex h-full items-center justify-center">
-            <span className="inline-flex items-center gap-2 text-xs text-muted">
-              <Spinner size={13} /> 正在生成参考图…
-            </span>
-          </div>
-        )}
-
-        <div className="absolute right-2 top-2 flex items-center gap-1">
-          {done && (
-            <button
-              title="查看大图"
-              className="flex h-6 w-6 items-center justify-center rounded bg-black/45 text-white/90 opacity-0 hover:bg-black/70 group-hover:opacity-100"
-              onClick={(e) => { e.stopPropagation(); onZoom() }}
-            >
-              🔍
-            </button>
-          )}
-          <button
-            title="更多"
-            className="flex h-6 w-6 items-center justify-center rounded bg-black/45 text-white/90 opacity-0 hover:bg-black/70 group-hover:opacity-100"
-            onClick={(e) => { e.stopPropagation(); onMenu(e) }}
-          >
-            ⋯
-          </button>
+    <div
+      onClick={onEdit}
+      className="group relative flex aspect-square cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-line bg-panel transition-colors hover:border-brand/50"
+    >
+      {/* 已生成：图片铺底 */}
+      {done && a.imageUrl && (
+        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${a.imageUrl}")` }} />
+      )}
+      {/* 生成中：骨架 */}
+      {a.imgState === 'generating' && (
+        <div className="skeleton absolute inset-0 flex items-center justify-center">
+          <span className="inline-flex items-center gap-2 text-xs text-muted">
+            <Spinner size={13} /> 正在生成参考图…
+          </span>
         </div>
+      )}
+
+      {/* 未生成：显示设定描述占位 */}
+      {a.imgState === 'none' && (
+        <p className="relative z-[1] line-clamp-5 px-4 pt-5 text-[13px] leading-relaxed text-faint">
+          {a.desc || a.prompt}
+        </p>
+      )}
+
+      {/* 右上角操作按钮 */}
+      <div className="absolute right-2.5 top-2.5 z-[2] flex items-center gap-1">
+        {done && (
+          <button
+            title="查看大图"
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 opacity-0 hover:bg-black/70 group-hover:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              onZoom()
+            }}
+          >
+            🔍
+          </button>
+        )}
+        <button
+          title="更多"
+          className="flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 opacity-0 hover:bg-black/70 group-hover:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenu(e)
+          }}
+        >
+          ⋯
+        </button>
       </div>
 
-      <div className="mt-2 text-sm font-medium text-white">{a.name}</div>
-      <div className="mt-0.5 text-xs text-faint">{a.kind === 'char' ? importanceCn(a) : '场景'}</div>
-      <div className="mt-1 line-clamp-2 text-xs text-muted">{a.desc}</div>
-
-      <div className="mt-2 flex items-center gap-3 text-[13px]">
-        <button className="text-brand hover:underline" onClick={onEdit}>
-          编辑设定
-        </button>
-        {done && <span className="text-xs text-faint">参考图已生成</span>}
+      {/* 底部信息条 */}
+      <div
+        className={`relative z-[1] p-4 ${done ? 'bg-gradient-to-t from-black/85 via-black/45 to-transparent pt-10' : ''}`}
+      >
+        <div className="text-[17px] font-semibold text-white">{a.name}</div>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-xs text-muted">{typeCn}</span>
+          <span className="text-xs text-faint">{statusCn}</span>
+        </div>
       </div>
     </div>
   )
@@ -409,7 +414,8 @@ function BatchModal({
   )
 }
 
-function EditSettingModal({
+/* 居中设定弹窗：名字双击可改，描述可编辑（无自动保存，点“保存”提交） */
+function AssetSettingModal({
   a,
   onClose,
   onSave,
@@ -418,9 +424,10 @@ function EditSettingModal({
   onClose: () => void
   onSave: (patch: Partial<Asset>) => void
 }) {
+  const isChar = a.kind === 'char'
   const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
-  const isChar = a.kind === 'char'
+
   return (
     <Modal
       title={isChar ? '编辑角色设定' : '编辑场景设定'}
@@ -429,25 +436,55 @@ function EditSettingModal({
       footer={
         <>
           <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" onClick={() => onSave({ desc, prompt })}>
-            保存修改
+          <Button
+            variant="primary"
+            onClick={() => {
+              onSave({ desc, prompt })
+              onClose()
+            }}
+          >
+            保存
           </Button>
         </>
       }
     >
-      {isChar && (
-        <div className="mb-4 flex items-center gap-2 text-[13px]">
-          <span className="text-muted">角色名称：</span>
-          <span className="text-white">{a.name}</span>
-          <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">{importanceCn(a)}</span>
-        </div>
-      )}
+      <div className="mb-4">
+        <Label>{isChar ? '角色名称' : '场景名称'}</Label>
+        <EditableName value={a.name} onCommit={(v) => onSave({ name: v.trim() || a.name })} />
+      </div>
+
       <Label>{isChar ? '角色描述' : '场景描述'}</Label>
       <Textarea rows={5} value={desc} onChange={(e) => setDesc(e.target.value)} />
       <div className="h-3" />
       <Label>参考图描述</Label>
       <Textarea rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="mt-1 text-[12px] text-faint">将用于生成{isChar ? '角色' : '场景'}参考图</div>
+      <div className="mt-1 text-[12px] text-faint">用于生成{isChar ? '角色' : '场景'}参考图</div>
     </Modal>
+  )
+}
+
+/* 名字：双击进入编辑（无多余提示文案，仅原生 tooltip） */
+function EditableName({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  if (editing) {
+    return (
+      <InlineRename
+        value={value}
+        className="text-[18px] font-semibold"
+        onCommit={(v) => {
+          onCommit(v)
+          setEditing(false)
+        }}
+      />
+    )
+  }
+  return (
+    <div
+      title="双击可改名"
+      onDoubleClick={() => setEditing(true)}
+      className="cursor-text select-none text-[18px] font-semibold text-white"
+    >
+      {value}
+    </div>
   )
 }

@@ -29,9 +29,9 @@ export function projectStatus(p: Project): string {
   if (p.assetStatus === 'done') return '待生成镜头'
   if (p.assetStatus === 'generating') return '正在提取角色与场景'
   if (p.segStatus === 'done') return '待提取角色与场景'
-  if (p.segStatus === 'generating') return '正在拆解故事'
-  if (p.script.trim().length > 0) return '待拆解故事'
-  return '待添加故事'
+  if (p.segStatus === 'generating') return '正在拆解剧本'
+  if (p.script.trim().length > 0) return '待拆解剧本'
+  return '待添加剧本'
 }
 
 /* 状态是否属于「进行中」（用于卡片上加一个呼吸点） */

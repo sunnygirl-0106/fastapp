@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -183,6 +183,62 @@ export function FakeSelect({ value }: { value: string }) {
     <div className="flex items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-2 text-sm">
       <span>{value}</span>
       <span className="text-faint">▾</span>
+    </div>
+  )
+}
+
+/* 可交互下拉选择（模型选择等） */
+export function ModelSelect({
+  value,
+  options,
+  onChange,
+  width = 168,
+}: {
+  value: string
+  options: readonly string[]
+  onChange: (v: string) => void
+  width?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  return (
+    <div ref={ref} className="relative" style={{ width }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm transition-colors hover:border-brand/60"
+      >
+        <span className="truncate">{value}</span>
+        <span className={`ml-1 shrink-0 text-faint transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
+          {options.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => {
+                onChange(o)
+                setOpen(false)
+              }}
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-line ${
+                o === value ? 'text-brand' : 'text-white/90'
+              }`}
+            >
+              <span className="truncate">{o}</span>
+              {o === value && <span className="ml-2 shrink-0">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -484,6 +540,93 @@ export function StaleNotice({
           {actionText}
         </Button>
       )}
+    </div>
+  )
+}
+
+/* ---------- 表格只读单元格：截断预览，点击弹出完整内容 ---------- */
+export function ReadCell({ value, onClick }: { value?: string; onClick: (e: React.MouseEvent) => void }) {
+  if (!value || !value.trim()) return <span className="text-[13px] text-faint">—</span>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="line-clamp-2 w-full cursor-pointer rounded-md text-left text-[13px] leading-relaxed text-muted transition-colors hover:text-white/90"
+    >
+      {value}
+    </button>
+  )
+}
+
+/* ---------- 原地弹出的青色描边只读框 ---------- */
+export function CellPopover({
+  rect,
+  label,
+  value,
+  onClose,
+}: {
+  rect: DOMRect
+  label: string
+  value: string
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  // 宽度对齐被点单元格（原地展开）；过窄的列给一个可读下限
+  const width = Math.min(Math.max(rect.width, 300), window.innerWidth - 24)
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: rect.left, top: rect.bottom + 4 })
+
+  // 关闭：点击外部 / Esc
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  // 计算位置：左对齐单元格、紧贴其下方展开，溢出视口时回收
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const h = el.offsetHeight
+    const margin = 12
+    let left = rect.left
+    if (left + width > window.innerWidth - margin) left = window.innerWidth - margin - width
+    if (left < margin) left = margin
+    let top = rect.bottom + 4
+    if (top + h > window.innerHeight - margin) {
+      const above = rect.top - 4 - h
+      top = above > margin ? above : Math.max(margin, window.innerHeight - margin - h)
+    }
+    setPos({ left, top })
+  }, [rect, width])
+
+  return (
+    <div
+      ref={ref}
+      style={{ left: pos.left, top: pos.top, width }}
+      className="fixed z-50 animate-fadeUp rounded-xl border border-brand/70 bg-panel shadow-2xl ring-1 ring-brand/20"
+    >
+      <div className="flex items-center justify-between border-b border-line/60 px-4 py-2.5">
+        <span className="text-[12px] font-medium text-brand">{label}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-0.5 text-faint transition-colors hover:text-white/90"
+          title="关闭"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="max-h-[320px] overflow-y-auto px-4 py-3">
+        <div className="whitespace-pre-line text-[13px] leading-relaxed text-white/90">{value}</div>
+      </div>
+      <div className="border-t border-line/60 px-4 py-2 text-[11px] text-faint">只读</div>
     </div>
   )
 }

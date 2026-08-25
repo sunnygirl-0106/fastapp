@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Project } from '@/types'
-import { COST, MODELS } from '@/services/generation'
-import { Button, FakeSelect, Label, Modal, Textarea, fmt } from '@/components/ui'
+import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
+import { Button, Label, Modal, ModelSelect, Textarea, fmt } from '@/components/ui'
 
 // Step3（进入镜头设计）与 Step4（重新生成镜头）共用
 export default function GenShotModal({
@@ -15,6 +15,7 @@ export default function GenShotModal({
 }) {
   const segs = project.segments
   const [style, setStyle] = useState('')
+  const [model, setModel] = useState<string>(MODELS.text)
   const [sel, setSel] = useState<number[]>(segs.map((s) => s.no))
   const toggle = (no: number) => setSel((s) => (s.includes(no) ? s.filter((x) => x !== no) : [...s, no]))
   const cost = sel.length * COST.shotGenEach
@@ -39,10 +40,10 @@ export default function GenShotModal({
         </div>
       }
     >
-      <div className="mb-4 text-[13px] text-muted">选择需要生成镜头的故事段落，默认已全部选择。</div>
+      <div className="mb-4 text-[13px] text-muted">选择需要生成镜头的剧本段落，默认已全部选择。</div>
 
       <Label>生成模型</Label>
-      <FakeSelect value={MODELS.text} />
+      <ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} width={240} />
       <div className="h-3" />
       <Label>画面风格补充（可选）</Label>
       <Textarea
@@ -52,7 +53,7 @@ export default function GenShotModal({
         onChange={(e) => setStyle(e.target.value)}
       />
 
-      <div className="mb-2 mt-4 text-[13px] text-muted">故事段落（{segs.length}）</div>
+      <div className="mb-2 mt-4 text-[13px] text-muted">剧本段落（{segs.length}）</div>
       <div className="overflow-hidden rounded-lg border border-line">
         <div className="grid grid-cols-[40px_60px_160px_70px_90px_1fr] gap-2 border-b border-line bg-panel2 px-3 py-2 text-xs text-muted">
           <div>
@@ -67,7 +68,7 @@ export default function GenShotModal({
           <div>标题</div>
           <div>时长</div>
           <div>场景</div>
-          <div>故事内容</div>
+          <div>剧本内容</div>
         </div>
         {segs.map((s) => (
           <div

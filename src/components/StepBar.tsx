@@ -1,7 +1,7 @@
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 
-const STEPS = ['故事', '拆解', '角色与场景', '镜头', '成片']
+const STEPS = ['剧本', '拆解', '角色与场景', '镜头', '成片']
 
 // 解锁规则：已开始（对应状态不为 none）即可进入
 export function stepUnlocked(p: Project): boolean[] {

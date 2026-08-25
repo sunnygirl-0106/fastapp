@@ -134,7 +134,7 @@ export const useStore = create<State>((set, get) => {
       p.segStatus = 'done'
       markStaleFromSegments(p)
     })
-    get().showToast('已生成 3 个故事段落')
+    get().showToast('已生成 3 个剧本段落')
   }
 
   const finishAssets = async () => {
@@ -233,7 +233,7 @@ export const useStore = create<State>((set, get) => {
 
     generateSegments: async () => {
       patchProject((p) => { p.segStatus = 'generating' })
-      get().showToast('正在拆解故事…')
+      get().showToast('正在拆解剧本…')
       await finishSegments()
     },
 
@@ -242,7 +242,7 @@ export const useStore = create<State>((set, get) => {
         const no = p.segments.length + 1
         p.segments.push({ id: uid('seg'), no, title: title.trim(), dur: '15s', text: text.trim() })
       })
-      get().showToast('已新增故事段落')
+      get().showToast('已新增剧本段落')
     },
 
     updateSegmentTitle: (id, title) => {
@@ -257,7 +257,7 @@ export const useStore = create<State>((set, get) => {
         p.segments = p.segments.filter((x) => x.id !== id)
         p.segments.forEach((s, i) => (s.no = i + 1))
       })
-      get().showToast('已删除故事段落')
+      get().showToast('已删除剧本段落')
     },
 
     extractAssets: async () => {
