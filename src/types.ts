@@ -101,13 +101,12 @@ export const SHOT_FIELDS: { key: keyof Shot; label: string }[] = [
 
 export const SHOT_GROUPS: { title: string; fields: (keyof Shot)[] }[] = [
   { title: '画面与节奏', fields: ['shot', 'timeline', 'action'] },
-  { title: '人物与空间', fields: ['anchor', 'motion', 'blocking'] },
-  { title: '画面一致性', fields: ['continuity', 'subject', 'forbid', 'background'] },
+  { title: '人物与空间', fields: ['subject', 'anchor', 'motion', 'blocking'] },
+  { title: '更多设定', fields: ['continuity', 'forbid', 'background'] },
 ]
 
-// Step4 主列表只铺开这三项，其余全部收进「镜头详情」
-export const SHOT_PRIMARY_FIELDS: { key: keyof Shot; label: string }[] = [
+// 镜头卡片收起态展示的字段
+export const SHOT_CARD_FIELDS: { key: keyof Shot; label: string }[] = [
   { key: 'shot', label: '画面' },
-  { key: 'action', label: '人物动作' },
-  { key: 'anchor', label: '场景位置' },
+  { key: 'timeline', label: '时间线' },
 ]

@@ -64,43 +64,6 @@ export function Modal({
   )
 }
 
-/* ---------- 右侧抽屉 ---------- */
-export function Drawer({
-  title,
-  header,
-  onClose,
-  children,
-  footer,
-  width = 460,
-}: {
-  title?: string
-  header?: ReactNode
-  onClose: () => void
-  children: ReactNode
-  footer?: ReactNode
-  width?: number
-}) {
-  return (
-    <div className="fixed inset-0 z-40" onMouseDown={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="absolute right-0 top-0 flex h-full flex-col border-l border-line bg-panel shadow-2xl animate-fadeUp"
-        style={{ width }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          {header ?? <div className="text-brand text-[15px] font-semibold">{title}</div>}
-          <button className="text-muted hover:text-white" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3">{footer}</div>}
-      </div>
-    </div>
-  )
-}
-
 /* ---------- 按钮 ---------- */
 type BtnProps = {
   children: ReactNode
@@ -168,11 +131,13 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ dim, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { dim?: boolean }) {
   return (
     <textarea
       {...props}
-      className={`w-full resize-y rounded-lg border border-line bg-panel2 px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-faint focus:border-brand/60 ${props.className ?? ''}`}
+      className={`w-full resize-y rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-faint focus:border-brand/60 ${
+        dim ? 'border-line/60 bg-ink' : 'border-line bg-panel2'
+      } ${props.className ?? ''}`}
     />
   )
 }

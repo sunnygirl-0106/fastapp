@@ -312,7 +312,15 @@ export const useStore = create<State>((set, get) => {
     updateShot: (id, patch) => {
       patchProject((p) => {
         const s = p.shots.find((x) => x.id === id)
-        if (s) Object.assign(s, patch)
+        if (!s) return
+        // 只在值真的变化时写入，避免 blur 空提交把视频误标为需重新生成
+        const changed = Object.entries(patch).some(
+          ([k, v]) => String(s[k as keyof Shot] ?? '') !== String(v ?? ''),
+        )
+        if (!changed) return
+        Object.assign(s, patch)
+        // 镜头内容变了，已有视频失效
+        if (s.video.state === 'done') s.video.stale = true
       })
     },
 

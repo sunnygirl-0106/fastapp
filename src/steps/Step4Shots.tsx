@@ -1,22 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronUp, Loader2, MoreHorizontal } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
+import { SHOT_CARD_FIELDS, SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST } from '@/services/generation'
 import { no2, fmtDur } from '@/utils/project'
+import { useAutoSave } from '@/hooks/useAutoSave'
 import {
   ActionBar,
   Button,
-  CellPopover,
   Diamond,
   GeneratingState,
   MenuItem,
   PageHeader,
   Popover,
-  ReadCell,
   StaleNotice,
+  Textarea,
   fmt,
 } from '@/components/ui'
-import ShotEditDrawer from './ShotEditDrawer'
 import GenShotModal from './GenShotModal'
 import VideoConfirmModal from './VideoConfirmModal'
 
@@ -27,21 +28,7 @@ function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string 
   return { text: '尚未生成视频', cls: 'text-faint', dot: 'bg-faint' }
 }
 
-// 分镜表格列（标签对齐参考图）
-const SHOT_COLS: { key: keyof Shot; label: string; w: string }[] = [
-  { key: 'shot', label: '镜头', w: 'w-[180px]' },
-  { key: 'timeline', label: '时间线', w: 'w-[150px]' },
-  { key: 'action', label: '核心动作', w: 'w-[170px]' },
-  { key: 'anchor', label: '空间锚点', w: 'w-[120px]' },
-  { key: 'motion', label: '运动规则', w: 'w-[160px]' },
-  { key: 'blocking', label: '人物位置', w: 'w-[150px]' },
-  { key: 'continuity', label: '连续性约束', w: 'w-[160px]' },
-  { key: 'subject', label: '主体约束', w: 'w-[100px]' },
-  { key: 'forbid', label: '不可变化项', w: 'w-[160px]' },
-  { key: 'background', label: '背景范围', w: 'w-[140px]' },
-]
-
-type ShotPop = { rect: DOMRect; label: string; value: string } | null
+const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? String(k)
 
 export default function Step4Shots({ project }: { project: Project }) {
   const { generateShots, deleteShot, regenerateShot, startVideos } = useStore()
@@ -50,10 +37,9 @@ export default function Step4Shots({ project }: { project: Project }) {
 
   const [genOpen, setGenOpen] = useState(false)
   const [sel, setSel] = useState<string[]>([])
-  const [edit, setEdit] = useState<Shot | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
   const [videoConfirm, setVideoConfirm] = useState<string[] | null>(null)
-  const [pop, setPop] = useState<ShotPop>(null)
 
   // 镜头生成完成后，默认选中所有尚未生成视频（或已失效）的镜头
   useEffect(() => {
@@ -63,14 +49,6 @@ export default function Step4Shots({ project }: { project: Project }) {
   }, [st, shots.length])
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-  const allSelected = shots.length > 0 && sel.length === shots.length
-  const toggleAll = () => setSel(allSelected ? [] : shots.map((s) => s.id))
-
-  const openPop = (e: React.MouseEvent, label: string, value?: string) => {
-    if (!value || !String(value).trim()) return
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setPop({ rect, label, value: String(value) })
-  }
 
   if (st === 'generating') {
     return (
@@ -101,100 +79,37 @@ export default function Step4Shots({ project }: { project: Project }) {
         }
       />
 
-      {project.shotStale && <StaleNotice text="角色与场景已更新，建议重新生成镜头。" actionText="重新生成镜头" onAction={() => setGenOpen(true)} />}
+      {project.shotStale && (
+        <StaleNotice
+          text="角色与场景已更新，建议重新生成镜头。"
+          actionText="重新生成镜头"
+          onAction={() => setGenOpen(true)}
+        />
+      )}
 
-      <div className="mb-3 text-[13px] text-muted">
-        勾选需要生成视频的镜头 · 点击单元格查看完整内容，「操作」可编辑镜头详情
+      <div className="space-y-3">
+        {shots.map((s) => (
+          <ShotCard
+            key={s.id}
+            shot={s}
+            selected={sel.includes(s.id)}
+            expanded={expandedId === s.id}
+            onToggleSelect={() => toggle(s.id)}
+            onExpand={() => setExpandedId(s.id)}
+            onCollapse={() => setExpandedId((id) => (id === s.id ? null : id))}
+            onMenu={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setMenu({ s, top: r.bottom + 4, left: r.left - 168 })
+            }}
+          />
+        ))}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-line/70 bg-panel">
-        <table className="w-full min-w-[1560px] table-fixed border-collapse text-left">
-          <colgroup>
-            <col className="w-[44px]" />
-            <col className="w-[110px]" />
-            {SHOT_COLS.map((c) => (
-              <col key={c.key} className={c.w} />
-            ))}
-            <col className="w-[56px]" />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-line bg-panel2/70 text-[12px] font-medium text-faint">
-              <th className="px-3 py-3">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleAll}
-                  className="accent-brand align-middle"
-                  title={allSelected ? '取消全选' : '全选'}
-                />
-              </th>
-              <th className="whitespace-nowrap px-3 py-3">镜号</th>
-              {SHOT_COLS.map((c) => (
-                <th key={c.key} className="whitespace-nowrap px-3 py-3">
-                  {c.label}
-                </th>
-              ))}
-              <th className="whitespace-nowrap px-3 py-3 text-center">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shots.map((s) => {
-              const vi = videoStateInfo(s.video)
-              return (
-                <tr
-                  key={s.id}
-                  className={`group border-b border-line/50 align-top last:border-b-0 transition-colors ${
-                    sel.includes(s.id) ? 'bg-brand/[0.06]' : 'hover:bg-panel2/50'
-                  }`}
-                >
-                  <td className="px-3 py-3.5">
-                    <input
-                      type="checkbox"
-                      checked={sel.includes(s.id)}
-                      onChange={() => toggle(s.id)}
-                      className="accent-brand align-middle"
-                    />
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3.5">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-[13px] font-medium tabular-nums text-white/85">{no2(s.no)}</span>
-                      <span className="text-[11px] text-faint">{fmtDur('15s')}</span>
-                    </div>
-                    <div className={`mt-1.5 inline-flex items-center gap-1 text-[11px] ${vi.cls}`}>
-                      <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${vi.dot}`} />
-                      {vi.text}
-                    </div>
-                  </td>
-                  {SHOT_COLS.map((c) => (
-                    <td key={c.key} className="px-3 py-3">
-                      <ReadCell value={String(s[c.key] ?? '')} onClick={(e) => openPop(e, c.label, String(s[c.key] ?? ''))} />
-                    </td>
-                  ))}
-                  <td className="px-3 py-3.5 text-center">
-                    <button
-                      className="rounded-md px-1.5 py-0.5 text-muted transition-colors hover:bg-panel2 hover:text-white"
-                      onClick={(e) => {
-                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                        setMenu({ s, top: r.bottom + 4, left: r.left - 160 })
-                      }}
-                    >
-                      ⋯
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-
-        {pop && <CellPopover {...pop} onClose={() => setPop(null)} />}
-      </div>
-
-      <ActionBar left={`已选择 ${sel.length}/${shots.length} 个镜头，可取消个别镜头`}>
+      <ActionBar left={`已选择 ${sel.length}/${shots.length} 个镜头`}>
         <Button variant="primary" size="lg" disabled={!sel.length} onClick={() => setVideoConfirm(sel)}>
           {sel.length ? (
             <>
-              生成全部 {sel.length} 段视频 · <Diamond />
+              生成 {sel.length} 段视频 · <Diamond />
               {fmt(sel.length * COST.videoEach)}
             </>
           ) : (
@@ -218,24 +133,13 @@ export default function Step4Shots({ project }: { project: Project }) {
       {/* 行 ⋯ 菜单 */}
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { setEdit(menu.s); setMenu(null) }}>编辑镜头详情</MenuItem>
           <MenuItem onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem>
-          <MenuItem
-            onClick={() => {
-              setVideoConfirm([menu.s.id])
-              setMenu(null)
-            }}
-          >
-            生成该镜头视频
-          </MenuItem>
+          <MenuItem onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
           <MenuItem danger onClick={() => { deleteShot(menu.s.id); setMenu(null) }}>
             删除镜头
           </MenuItem>
         </Popover>
       )}
-
-      {/* 编辑镜头抽屉 */}
-      {edit && <ShotEditDrawer project={project} shotId={edit.id} onClose={() => setEdit(null)} />}
 
       {/* 确认生成视频 → 先置 generating，再切到第五步 */}
       {videoConfirm && (
@@ -252,4 +156,152 @@ export default function Step4Shots({ project }: { project: Project }) {
       )}
     </div>
   )
+}
+
+/* ---------- 单个镜头卡片：收起态 + 行内展开编辑 ---------- */
+function ShotCard({
+  shot,
+  selected,
+  expanded,
+  onToggleSelect,
+  onExpand,
+  onCollapse,
+  onMenu,
+}: {
+  shot: Shot
+  selected: boolean
+  expanded: boolean
+  onToggleSelect: () => void
+  onExpand: () => void
+  onCollapse: () => void
+  onMenu: (e: React.MouseEvent) => void
+}) {
+  const vi = videoStateInfo(shot.video)
+  return (
+    <div
+      className={`rounded-xl border transition-colors ${
+        selected ? 'border-line bg-panel' : 'border-line/50 bg-panel opacity-55'
+      }`}
+    >
+      {/* 镜号行 */}
+      <div className="flex items-center gap-3 px-5 pt-4">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="accent-brand"
+        />
+        <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
+        <span className="text-[13px] text-faint">{fmtDur('15s')}</span>
+        <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
+          {vi.text}
+        </span>
+        {!selected && <span className="text-xs text-faint">不生成</span>}
+        <div className="ml-auto">
+          <button
+            className="rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-panel2 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation()
+              onMenu(e)
+            }}
+            title="更多"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
+      </div>
+
+      {expanded ? (
+        <ShotExpandedEditor shot={shot} onCollapse={onCollapse} />
+      ) : (
+        <button
+          type="button"
+          onClick={onExpand}
+          className="block w-full cursor-pointer space-y-3 px-5 pb-4 pt-3 text-left"
+        >
+          {SHOT_CARD_FIELDS.map((f) => (
+            <div key={f.key}>
+              <div className="mb-1 text-xs text-muted">{f.label}</div>
+              <div className="whitespace-pre-line text-[13.5px] leading-relaxed text-white/90">
+                {String(shot[f.key] ?? '')}
+              </div>
+            </div>
+          ))}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ---------- 展开态编辑区：卸载时（收起/切换/离开）自动 flush ---------- */
+function ShotExpandedEditor({ shot, onCollapse }: { shot: Shot; onCollapse: () => void }) {
+  const updateShot = useStore((s) => s.updateShot)
+  const [draft, setDraft] = useState<Record<string, string>>(() => snapshot(shot))
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  // 单个卡片共用一个保存状态；commit 读取最新 draft，写入整份（store 内部按变化过滤）
+  const { status, schedule } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
+
+  const setField = (k: keyof Shot, v: string) => {
+    setDraft((d) => {
+      const nd = { ...d, [k]: v }
+      draftRef.current = nd
+      return nd
+    })
+    schedule(v)
+  }
+
+  return (
+    <div className="px-5 pb-4 pt-1">
+      <div className="mb-2 flex h-4 items-center justify-end text-[12px]">
+        {status === 'saving' && (
+          <span className="inline-flex items-center gap-1 text-muted">
+            <Loader2 size={12} className="animate-spin" /> 正在保存…
+          </span>
+        )}
+        {status === 'saved' && <span className="text-brand">已保存</span>}
+      </div>
+
+      {SHOT_GROUPS.map((g, gi) => {
+        const dim = gi === SHOT_GROUPS.length - 1
+        return (
+          <div key={g.title} className="mb-4 last:mb-0">
+            <div className={`mb-2 text-[13px] font-medium ${dim ? 'text-faint' : 'text-muted'}`}>{g.title}</div>
+            <div className="space-y-2.5">
+              {g.fields.map((k) => (
+                <div key={k} className="grid grid-cols-[76px_1fr] items-start gap-3">
+                  <div className="pt-2 text-[13px] text-muted">{labelOf(k)}</div>
+                  <Textarea
+                    dim={dim}
+                    rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
+                    value={draft[k]}
+                    onChange={(e) => setField(k, e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={onCollapse}
+          className="inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-white"
+        >
+          收起 <ChevronUp size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function snapshot(s: Shot): Record<string, string> {
+  const o: Record<string, string> = {}
+  SHOT_FIELDS.forEach((f) => (o[f.key] = String(s[f.key] ?? '')))
+  return o
 }
