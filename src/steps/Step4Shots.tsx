@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronUp, Loader2, MoreHorizontal } from 'lucide-react'
+import { ChevronDown, MoreHorizontal } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
-import { SHOT_CARD_FIELDS, SHOT_FIELDS, SHOT_GROUPS } from '@/types'
+import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST } from '@/services/generation'
 import { no2, fmtDur } from '@/utils/project'
@@ -10,10 +10,12 @@ import {
   ActionBar,
   Button,
   Diamond,
+  Drawer,
   GeneratingState,
   MenuItem,
   PageHeader,
   Popover,
+  SaveBadge,
   StaleNotice,
   Textarea,
   fmt,
@@ -30,6 +32,15 @@ function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string 
 
 const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? String(k)
 
+// 时间线展示：拆成固定三段（0–5 / 5–10 / 10–15 秒），不足补空行以稳定行高
+function parseTimeline(raw: string): string[] {
+  const lines = (raw ?? '').split('\n').map((l) => l.trim()).filter(Boolean)
+  return [0, 1, 2].map((i) => lines[i] ?? '')
+}
+
+// 5 列网格：选择 44 / 镜头 150 / 画面 45fr / 时间线 40fr / 操作 56
+const GRID = 'grid grid-cols-[44px_150px_minmax(0,45fr)_minmax(0,40fr)_56px]'
+
 export default function Step4Shots({ project }: { project: Project }) {
   const { generateShots, deleteShot, regenerateShot, startVideos } = useStore()
   const st = project.shotStatus
@@ -37,7 +48,7 @@ export default function Step4Shots({ project }: { project: Project }) {
 
   const [genOpen, setGenOpen] = useState(false)
   const [sel, setSel] = useState<string[]>([])
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
   const [videoConfirm, setVideoConfirm] = useState<string[] | null>(null)
 
@@ -67,15 +78,20 @@ export default function Step4Shots({ project }: { project: Project }) {
     )
   }
 
+  const detailShot = detailId ? shots.find((s) => s.id === detailId) ?? null : null
+
   return (
     <div>
       <PageHeader
         title="镜头设计"
         desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.length * 15} 秒。`}
         right={
-          <Button variant="ghost" size="sm" onClick={() => setGenOpen(true)}>
+          <button
+            onClick={() => setGenOpen(true)}
+            className="text-[13px] text-muted transition-colors hover:text-white"
+          >
             重新生成镜头
-          </Button>
+          </button>
         }
       />
 
@@ -87,16 +103,25 @@ export default function Step4Shots({ project }: { project: Project }) {
         />
       )}
 
-      <div className="space-y-3">
+      {/* 表头 */}
+      <div className={`${GRID} items-center border-b border-line/60 px-1 pb-2 text-[12px] text-faint`}>
+        <div className="text-center">选择</div>
+        <div className="px-3">镜头</div>
+        <div className="px-3">画面</div>
+        <div className="px-3">时间线</div>
+        <div className="text-center">操作</div>
+      </div>
+
+      <div className="mt-2 space-y-2">
         {shots.map((s) => (
-          <ShotCard
+          <ShotRow
             key={s.id}
             shot={s}
             selected={sel.includes(s.id)}
-            expanded={expandedId === s.id}
+            active={detailId === s.id}
             onToggleSelect={() => toggle(s.id)}
-            onExpand={() => setExpandedId(s.id)}
-            onCollapse={() => setExpandedId((id) => (id === s.id ? null : id))}
+            onOpenDetail={() => setDetailId(s.id)}
+            onCommit={(patch) => useStore.getState().updateShot(s.id, patch)}
             onMenu={(e) => {
               const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
               setMenu({ s, top: r.bottom + 4, left: r.left - 168 })
@@ -118,6 +143,11 @@ export default function Step4Shots({ project }: { project: Project }) {
         </Button>
       </ActionBar>
 
+      {/* 右侧详情面板：key 切换镜头时重挂载，卸载前自动 flush */}
+      {detailShot && (
+        <ShotDetailDrawer key={detailShot.id} shot={detailShot} onClose={() => setDetailId(null)} />
+      )}
+
       {/* 重新生成镜头（不切页） */}
       {genOpen && (
         <GenShotModal
@@ -130,7 +160,7 @@ export default function Step4Shots({ project }: { project: Project }) {
         />
       )}
 
-      {/* 行 ⋯ 菜单 */}
+      {/* 行 ⋯ 菜单：仅生成 / 删除 */}
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem>
@@ -158,91 +188,148 @@ export default function Step4Shots({ project }: { project: Project }) {
   )
 }
 
-/* ---------- 单个镜头卡片：收起态 + 行内展开编辑 ---------- */
-function ShotCard({
+/* ---------- 表格行：选择 / 镜头 / 画面 / 时间线 / 操作 ---------- */
+function ShotRow({
   shot,
   selected,
-  expanded,
+  active,
   onToggleSelect,
-  onExpand,
-  onCollapse,
+  onOpenDetail,
+  onCommit,
   onMenu,
 }: {
   shot: Shot
   selected: boolean
-  expanded: boolean
+  active: boolean
   onToggleSelect: () => void
-  onExpand: () => void
-  onCollapse: () => void
+  onOpenDetail: () => void
+  onCommit: (patch: Partial<Shot>) => void
   onMenu: (e: React.MouseEvent) => void
 }) {
   const vi = videoStateInfo(shot.video)
+  const tl = parseTimeline(shot.timeline)
+
   return (
     <div
-      className={`rounded-xl border transition-colors ${
-        selected ? 'border-line bg-panel' : 'border-line/50 bg-panel opacity-55'
-      }`}
+      onClick={onOpenDetail}
+      className={`${GRID} min-h-[120px] cursor-pointer items-stretch rounded-xl border bg-panel transition-colors ${
+        active ? 'border-transparent ring-1 ring-brand/50' : 'border-line hover:border-line'
+      } ${selected ? '' : 'opacity-60'}`}
     >
-      {/* 镜号行 */}
-      <div className="flex items-center gap-3 px-5 pt-4">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          onClick={(e) => e.stopPropagation()}
-          className="accent-brand"
-        />
+      {/* 选择 */}
+      <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <input type="checkbox" checked={selected} onChange={onToggleSelect} className="accent-brand" />
+      </div>
+
+      {/* 镜头信息 */}
+      <div className="flex flex-col justify-center gap-1 px-3 py-3">
         <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
-        <span className="text-[13px] text-faint">{fmtDur('15s')}</span>
+        <span className="text-[12px] text-faint">{fmtDur('15s')}</span>
         <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
           {vi.text}
         </span>
-        {!selected && <span className="text-xs text-faint">不生成</span>}
-        <div className="ml-auto">
-          <button
-            className="rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-panel2 hover:text-white"
-            onClick={(e) => {
-              e.stopPropagation()
-              onMenu(e)
-            }}
-            title="更多"
-          >
-            <MoreHorizontal size={16} />
-          </button>
-        </div>
+        {!selected && <span className="text-[12px] text-faint">不生成</span>}
       </div>
 
-      {expanded ? (
-        <ShotExpandedEditor shot={shot} onCollapse={onCollapse} />
-      ) : (
-        <button
-          type="button"
-          onClick={onExpand}
-          className="block w-full cursor-pointer space-y-3 px-5 pb-4 pt-3 text-left"
-        >
-          {SHOT_CARD_FIELDS.map((f) => (
-            <div key={f.key}>
-              <div className="mb-1 text-xs text-muted">{f.label}</div>
-              <div className="whitespace-pre-line text-[13.5px] leading-relaxed text-white/90">
-                {String(shot[f.key] ?? '')}
+      {/* 画面（就地编辑，最多 3 行） */}
+      <InlineCellEditor
+        value={shot.shot}
+        onCommit={(v) => onCommit({ shot: v })}
+        readView={<div className="line-clamp-3 whitespace-pre-line">{shot.shot}</div>}
+      />
+
+      {/* 时间线（就地编辑；只读态固定三段） */}
+      <InlineCellEditor
+        value={shot.timeline}
+        onCommit={(v) => onCommit({ timeline: v })}
+        readView={
+          <div className="space-y-1">
+            {tl.map((line, i) => (
+              <div key={i} className="line-clamp-1 text-white/80">
+                {line || ' '}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        }
+      />
+
+      {/* 操作 */}
+      <div className="flex items-start justify-center pt-3" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-panel2 hover:text-white"
+          onClick={onMenu}
+          title="更多"
+        >
+          <MoreHorizontal size={16} />
         </button>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- 单元格就地编辑：点击进入编辑，停输入自动保存、失焦立即保存 ---------- */
+function InlineCellEditor({
+  value,
+  onCommit,
+  readView,
+}: {
+  value: string
+  onCommit: (v: string) => void
+  readView: React.ReactNode
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const { status, schedule, flush } = useAutoSave((v) => onCommit(v))
+
+  useEffect(() => {
+    if (editing) ref.current?.focus()
+  }, [editing])
+
+  const start = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDraft(value)
+    setEditing(true)
+  }
+
+  return (
+    <div className="relative px-3 py-3 text-[13px] leading-relaxed text-white/90">
+      <div className="pointer-events-none absolute right-2 top-1">
+        <SaveBadge status={status} />
+      </div>
+      {editing ? (
+        <Textarea
+          ref={ref}
+          value={draft}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            schedule(e.target.value)
+          }}
+          onBlur={() => {
+            flush()
+            setEditing(false)
+          }}
+          className="h-[96px] resize-none text-[13px]"
+        />
+      ) : (
+        <div onClick={start} className="cursor-text">
+          {readView}
+        </div>
       )}
     </div>
   )
 }
 
-/* ---------- 展开态编辑区：卸载时（收起/切换/离开）自动 flush ---------- */
-function ShotExpandedEditor({ shot, onCollapse }: { shot: Shot; onCollapse: () => void }) {
+/* ---------- 右侧详情面板：分组字段 + 更多设定折叠；全自动保存，无保存按钮 ---------- */
+function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }) {
   const updateShot = useStore((s) => s.updateShot)
   const [draft, setDraft] = useState<Record<string, string>>(() => snapshot(shot))
   const draftRef = useRef(draft)
   draftRef.current = draft
+  const [moreOpen, setMoreOpen] = useState(false)
 
-  // 单个卡片共用一个保存状态；commit 读取最新 draft，写入整份（store 内部按变化过滤）
   const { status, schedule } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
 
   const setField = (k: keyof Shot, v: string) => {
@@ -254,49 +341,49 @@ function ShotExpandedEditor({ shot, onCollapse }: { shot: Shot; onCollapse: () =
     schedule(v)
   }
 
-  return (
-    <div className="px-5 pb-4 pt-1">
-      <div className="mb-2 flex h-4 items-center justify-end text-[12px]">
-        {status === 'saving' && (
-          <span className="inline-flex items-center gap-1 text-muted">
-            <Loader2 size={12} className="animate-spin" /> 正在保存…
-          </span>
-        )}
-        {status === 'saved' && <span className="text-brand">已保存</span>}
-      </div>
+  const renderFields = (fields: (keyof Shot)[], dim: boolean) => (
+    <div className="space-y-2.5">
+      {fields.map((k) => (
+        <div key={k} className="grid grid-cols-[76px_1fr] items-start gap-3">
+          <div className="pt-2 text-[13px] text-muted">{labelOf(k)}</div>
+          <Textarea
+            dim={dim}
+            rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
+            value={draft[k]}
+            onChange={(e) => setField(k, e.target.value)}
+          />
+        </div>
+      ))}
+    </div>
+  )
 
+  return (
+    <Drawer title={`镜头 ${no2(shot.no)}`} status={status} onClose={onClose} width={600}>
       {SHOT_GROUPS.map((g, gi) => {
-        const dim = gi === SHOT_GROUPS.length - 1
-        return (
-          <div key={g.title} className="mb-4 last:mb-0">
-            <div className={`mb-2 text-[13px] font-medium ${dim ? 'text-faint' : 'text-muted'}`}>{g.title}</div>
-            <div className="space-y-2.5">
-              {g.fields.map((k) => (
-                <div key={k} className="grid grid-cols-[76px_1fr] items-start gap-3">
-                  <div className="pt-2 text-[13px] text-muted">{labelOf(k)}</div>
-                  <Textarea
-                    dim={dim}
-                    rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
-                    value={draft[k]}
-                    onChange={(e) => setField(k, e.target.value)}
-                  />
-                </div>
-              ))}
+        const collapsible = gi === SHOT_GROUPS.length - 1 // 更多设定：默认收起
+        if (collapsible) {
+          return (
+            <div key={g.title} className="mt-2">
+              <button
+                type="button"
+                onClick={() => setMoreOpen((o) => !o)}
+                className="flex w-full items-center gap-1.5 py-2 text-[13px] font-medium text-faint transition-colors hover:text-muted"
+              >
+                <ChevronDown size={14} className={`transition-transform ${moreOpen ? '' : '-rotate-90'}`} />
+                {g.title}
+              </button>
+              {moreOpen && <div className="pt-1">{renderFields(g.fields, true)}</div>}
             </div>
+          )
+        }
+        return (
+          <div key={g.title} className="mb-5">
+            <div className="mb-2 text-[13px] font-medium text-muted">{g.title}</div>
+            {renderFields(g.fields, false)}
           </div>
         )
       })}
-
-      <div className="mt-3 flex justify-end">
-        <button
-          type="button"
-          onClick={onCollapse}
-          className="inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-white"
-        >
-          收起 <ChevronUp size={14} />
-        </button>
-      </div>
-    </div>
+    </Drawer>
   )
 }
 

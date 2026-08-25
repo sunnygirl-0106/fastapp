@@ -33,6 +33,21 @@ body {
   background: transparent;
 }
 
+/* 卡片操作揭示：桌面 hover / 键盘聚焦时显示，触控端（无 hover）默认常显 */
+.reveal {
+  opacity: 1;
+  transition: opacity 0.15s ease-out;
+}
+@media (hover: hover) {
+  .reveal {
+    opacity: 0;
+  }
+  .group:hover .reveal,
+  .group:focus-within .reveal {
+    opacity: 1;
+  }
+}
+
 /* 骨架 shimmer */
 .skeleton {
   position: relative;

@@ -104,9 +104,3 @@ export const SHOT_GROUPS: { title: string; fields: (keyof Shot)[] }[] = [
   { title: '人物与空间', fields: ['subject', 'anchor', 'motion', 'blocking'] },
   { title: '更多设定', fields: ['continuity', 'forbid', 'background'] },
 ]
-
-// 镜头卡片收起态展示的字段
-export const SHOT_CARD_FIELDS: { key: keyof Shot; label: string }[] = [
-  { key: 'shot', label: '画面' },
-  { key: 'timeline', label: '时间线' },
-]

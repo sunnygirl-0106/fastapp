@@ -22,10 +22,12 @@ export default {
         spin: { to: { transform: 'rotate(360deg)' } },
         shimmer: { '100%': { transform: 'translateX(100%)' } },
         fadeUp: { from: { opacity: '0', transform: 'translateY(6px)' }, to: { opacity: '1', transform: 'none' } },
+        slideInRight: { from: { transform: 'translateX(100%)' }, to: { transform: 'none' } },
       },
       animation: {
         spin: 'spin 0.8s linear infinite',
         fadeUp: 'fadeUp 0.2s ease-out',
+        slideInRight: 'slideInRight 0.22s ease-out',
       },
     },
   },

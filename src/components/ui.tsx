@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Image as ImageIcon, User, X } from 'lucide-react'
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Check, ChevronDown, Image as ImageIcon, Loader2, User, X } from 'lucide-react'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -65,6 +65,57 @@ export function Modal({
   )
 }
 
+/* ---------- 自动保存状态角标（正在保存…／已保存） ---------- */
+export function SaveBadge({ status }: { status: 'idle' | 'saving' | 'saved' }) {
+  if (status === 'saving')
+    return (
+      <span className="inline-flex items-center gap-1 text-[12px] text-muted">
+        <Loader2 size={12} className="animate-spin" /> 正在保存…
+      </span>
+    )
+  if (status === 'saved') return <span className="text-[12px] text-brand">已保存</span>
+  return null
+}
+
+/* ---------- 右侧滑入抽屉（详情面板；sticky header 常驻关闭按钮） ---------- */
+export function Drawer({
+  title,
+  status,
+  onClose,
+  children,
+  width = 600,
+}: {
+  title: ReactNode
+  status?: 'idle' | 'saving' | 'saved'
+  onClose: () => void
+  children: ReactNode
+  width?: number
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 animate-fadeUp" onMouseDown={onClose}>
+      <div
+        className="flex h-full max-w-[92vw] flex-col border-l border-line bg-panel shadow-2xl animate-slideInRight"
+        style={{ width }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-[1] flex items-center gap-3 border-b border-line bg-panel px-5 py-3.5">
+          <div className="text-[15px] font-semibold">{title}</div>
+          {status && <SaveBadge status={status} />}
+          <button className="ml-auto text-muted hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- 按钮 ---------- */
 type BtnProps = {
   children: ReactNode
@@ -116,16 +167,20 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-export function Textarea({ dim, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { dim?: boolean }) {
+export const Textarea = forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement> & { dim?: boolean }
+>(function Textarea({ dim, ...props }, ref) {
   return (
     <textarea
+      ref={ref}
       {...props}
       className={`w-full resize-y rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-faint focus:border-brand/60 ${
         dim ? 'border-line/60 bg-ink' : 'border-line bg-panel2'
       } ${props.className ?? ''}`}
     />
   )
-}
+})
 
 /* 只读展示型"下拉"（截图里模型选择等均为静态展示） */
 export function FakeSelect({ value }: { value: string }) {

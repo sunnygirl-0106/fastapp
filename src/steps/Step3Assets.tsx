@@ -72,7 +72,8 @@ export default function Step3Assets({ project }: { project: Project }) {
       ))
     )
 
-  const gridCls = 'grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6'
+  // 固定卡宽 260–280，自动排列：大屏 5–6 列、中屏 4、小屏 2–3，卡片不随屏拉大
+  const gridCls = 'grid grid-cols-[repeat(auto-fill,minmax(260px,280px))] justify-start gap-4'
 
   return (
     <div>
@@ -201,7 +202,6 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>编辑设定</MenuItem>
           <MenuItem onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
             选择本地图片
           </MenuItem>
@@ -272,7 +272,8 @@ function AssetCard({
   return (
     <div
       onClick={onCardClick}
-      className={`group relative flex aspect-square flex-col overflow-hidden rounded-xl border border-line bg-panel transition-colors ${
+      tabIndex={generating ? -1 : 0}
+      className={`group relative flex aspect-square flex-col overflow-hidden rounded-xl border border-line bg-panel outline-none transition-colors focus-visible:border-brand/60 ${
         generating ? 'cursor-default' : 'cursor-pointer hover:border-brand/50'
       }`}
     >
@@ -290,13 +291,14 @@ function AssetCard({
         </div>
       )}
 
-      {/* 未生成：图标空态 + 两个按钮 */}
+      {/* 未生成：图标空态常显；hover/聚焦/触控时叠加遮罩 + 淡入两个按钮 */}
       {a.imgState === 'none' && (
         <div className="relative z-[1] flex flex-1 flex-col">
-          <div className="flex-1">
+          <div className="flex flex-1 items-center justify-center">
             <RefPlaceholder kind={a.kind} name={a.name} />
           </div>
-          <div className="flex items-center justify-center gap-2 px-3 pb-3">
+          <div className="reveal pointer-events-none absolute inset-0 bg-black/30" />
+          <div className="reveal relative flex items-center justify-center gap-2 px-3 pb-3">
             <Button size="sm" onClick={stop(onEdit)}>编辑设定</Button>
             <Button size="sm" variant="primary" onClick={stop(onGen)}>
               生成参考图
@@ -305,19 +307,21 @@ function AssetCard({
         </div>
       )}
 
-      {/* 右上角：仅 ⋯ */}
-      <button
-        title="更多"
-        className="absolute right-2.5 top-2.5 z-[2] flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 opacity-0 hover:bg-black/70 group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation()
-          onMenu(e)
-        }}
-      >
-        <MoreHorizontal size={16} />
-      </button>
+      {/* 右上角 ⋯：默认隐藏，hover/聚焦/触控揭示 */}
+      {!generating && (
+        <button
+          title="更多"
+          className="reveal absolute right-2.5 top-2.5 z-[2] flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 hover:bg-black/70"
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenu(e)
+          }}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+      )}
 
-      {/* 已生成：底部信息条 + 弱化「编辑设定」 */}
+      {/* 已生成：底部信息条常显名称；「编辑设定」随揭示淡入 */}
       {done && (
         <div className="relative z-[1] mt-auto bg-gradient-to-t from-black/85 via-black/45 to-transparent p-4 pt-10">
           <div className="flex items-end justify-between gap-2">
@@ -327,7 +331,7 @@ function AssetCard({
             </div>
             <button
               onClick={stop(onEdit)}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-white/70 transition-colors hover:text-white"
+              className="reveal inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-white/70 transition-colors hover:text-white"
             >
               <Pencil size={12} /> 编辑设定
             </button>
