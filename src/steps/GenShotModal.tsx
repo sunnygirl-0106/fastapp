@@ -55,7 +55,7 @@ export default function GenShotModal({
 
       <div className="mb-2 mt-4 text-[13px] text-muted">剧本段落（{segs.length}）</div>
       <div className="overflow-hidden rounded-lg border border-line">
-        <div className="grid grid-cols-[40px_60px_160px_70px_90px_1fr] gap-2 border-b border-line bg-panel2 px-3 py-2 text-xs text-muted">
+        <div className="grid grid-cols-[40px_60px_180px_70px_1fr] gap-2 border-b border-line bg-panel2 px-3 py-2 text-xs text-muted">
           <div>
             <input
               type="checkbox"
@@ -67,13 +67,12 @@ export default function GenShotModal({
           <div>段落</div>
           <div>标题</div>
           <div>时长</div>
-          <div>场景</div>
           <div>剧本内容</div>
         </div>
         {segs.map((s) => (
           <div
             key={s.id}
-            className="grid grid-cols-[40px_60px_160px_70px_90px_1fr] gap-2 border-b border-line/60 px-3 py-2 text-[13px] last:border-0"
+            className="grid grid-cols-[40px_60px_180px_70px_1fr] gap-2 border-b border-line/60 px-3 py-2 text-[13px] last:border-0"
           >
             <div>
               <input type="checkbox" checked={sel.includes(s.no)} onChange={() => toggle(s.no)} className="accent-brand" />
@@ -81,7 +80,6 @@ export default function GenShotModal({
             <div className="tabular-nums">{s.no}</div>
             <div>{s.title}</div>
             <div className="text-muted">{s.dur}</div>
-            <div className="text-faint">{s.scene ?? ''}</div>
             <div className="line-clamp-1 text-muted">{s.text}</div>
           </div>
         ))}

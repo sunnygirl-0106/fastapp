@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { Project, Segment } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -6,7 +7,6 @@ import { no2, fmtDur } from '@/utils/project'
 import {
   ActionBar,
   Button,
-  CellPopover,
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
@@ -16,12 +16,11 @@ import {
   Modal,
   ModelSelect,
   PageHeader,
-  ReadCell,
   Textarea,
 } from '@/components/ui'
 
 export default function Step2Segments({ project }: { project: Project }) {
-  const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment } = useStore()
+  const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
   const [regenOpen, setRegenOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [extractOpen, setExtractOpen] = useState(false)
@@ -31,14 +30,16 @@ export default function Step2Segments({ project }: { project: Project }) {
 
   const st = project.segStatus
   const segs = project.segments
+  const assetStatus = project.assetStatus
+  const assetStale = !!project.assetStale
 
   if (st === 'generating') {
     return (
       <>
         <GeneratingState
           title="正在拆解剧本"
-          desc="AI 正在理解情节、角色和场景，请稍候。"
-          phases={['正在识别情节变化…', '正在整理出场角色与场景…', '正在生成剧本段落…']}
+          desc="AI 正在通读剧本并划分段落，请稍候。"
+          phases={['正在通读剧本…', '正在划分段落边界…', '正在整理段落标题…']}
           skeletons={3}
         />
         <ActionBar>
@@ -60,28 +61,37 @@ export default function Step2Segments({ project }: { project: Project }) {
               重新拆解
             </Button>
             <Button size="sm" onClick={() => setAddOpen(true)}>
-              ＋ 新增剧本段落
+              <Plus size={16} /> 新增剧本段落
             </Button>
           </>
         }
       />
 
-      <div className="mb-3 text-[13px] text-muted">
-        已生成 {segs.length} 个剧本段落 · 标题可直接编辑，点击其余单元格查看完整内容
+      <div className="mb-3 text-[13px] text-muted">共 {segs.length} 个剧本段落</div>
+
+      <div className="space-y-3">
+        {segs.map((s) => (
+          <ParagraphCard
+            key={s.id}
+            seg={s}
+            onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
+            onDelete={() => setConfirmDel(s)}
+          />
+        ))}
+        {segs.length === 0 && (
+          <div className="rounded-xl border border-line/60 bg-panel py-16 text-center text-[13px] text-faint">
+            暂无剧本段落
+          </div>
+        )}
       </div>
 
-      <SegmentTable
-        segs={segs}
-        onRenameTitle={(id, v) => updateSegmentTitle(id, v)}
-        onDelete={(s) => setConfirmDel(s)}
+      <BottomBar
+        assetStatus={assetStatus}
+        assetStale={assetStale}
+        disabled={segs.length === 0}
+        onExtract={() => setExtractOpen(true)}
+        onNext={() => goStep(3)}
       />
-
-      <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
-        <Button variant="primary" size="lg" disabled={segs.length === 0} onClick={() => setExtractOpen(true)}>
-          提取角色与场景 · <Diamond />
-          {COST.assetExtract}
-        </Button>
-      </ActionBar>
 
       {/* 新增剧本段落弹窗 */}
       {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
@@ -148,124 +158,151 @@ export default function Step2Segments({ project }: { project: Project }) {
   )
 }
 
-/* ---------- 剧本拆解表格 ---------- */
-
-type ColKey = 'scene' | 'roles' | 'action' | 'timeline' | 'text'
-const COLS: { key: ColKey; label: string; w: string }[] = [
-  { key: 'scene', label: '场景', w: 'w-[110px]' },
-  { key: 'roles', label: '出场角色', w: 'w-[130px]' },
-  { key: 'action', label: '核心动作', w: 'w-[220px]' },
-  { key: 'timeline', label: '时间线', w: 'w-[200px]' },
-  { key: 'text', label: '原文', w: 'w-[320px]' },
-]
-
-type PopState = { rect: DOMRect; label: string; value: string } | null
-
-function SegmentTable({
-  segs,
-  onRenameTitle,
-  onDelete,
+/* ---------- 底部主按钮：区分「往前走」与「重做」 ---------- */
+function BottomBar({
+  assetStatus,
+  assetStale,
+  disabled,
+  onExtract,
+  onNext,
 }: {
-  segs: Segment[]
-  onRenameTitle: (id: string, v: string) => void
-  onDelete: (s: Segment) => void
+  assetStatus: Project['assetStatus']
+  assetStale: boolean
+  disabled: boolean
+  onExtract: () => void
+  onNext: () => void
 }) {
-  const [pop, setPop] = useState<PopState>(null)
-
-  const openPop = (e: React.MouseEvent, label: string, value?: string) => {
-    if (!value || !value.trim()) return
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setPop({ rect, label, value })
+  // generating：等待中
+  if (assetStatus === 'generating') {
+    return (
+      <ActionBar>
+        <Button variant="primary" size="lg" disabled>
+          正在提取角色与场景…
+        </Button>
+      </ActionBar>
+    )
   }
-
+  // 已提取且未变脏：直接往前，不扣费、不显示价格
+  if (assetStatus === 'done' && !assetStale) {
+    return (
+      <ActionBar>
+        <Button variant="primary" size="lg" disabled={disabled} onClick={onNext}>
+          下一步：角色与场景
+        </Button>
+      </ActionBar>
+    )
+  }
+  // 已变脏：重新提取（带价格）
+  if (assetStale) {
+    return (
+      <ActionBar left="剧本段落有改动，重新提取可让角色与场景保持同步">
+        <Button variant="primary" size="lg" disabled={disabled} onClick={onExtract}>
+          重新提取角色与场景 · <Diamond />
+          {COST.assetExtract}
+        </Button>
+      </ActionBar>
+    )
+  }
+  // 未提取：首次提取（带价格）
   return (
-    <div className="overflow-x-auto rounded-xl border border-line/70 bg-panel">
-      <table className="w-full min-w-[1040px] table-fixed border-collapse text-left">
-        <colgroup>
-          <col className="w-[56px]" />
-          <col className="w-[170px]" />
-          <col className="w-[72px]" />
-          {COLS.map((c) => (
-            <col key={c.key} className={c.w} />
-          ))}
-          <col className="w-[44px]" />
-        </colgroup>
-        <thead>
-          <tr className="border-b border-line bg-panel2/70 text-[12px] font-medium text-faint">
-            <th className="whitespace-nowrap px-4 py-3">段号</th>
-            <th className="whitespace-nowrap px-3 py-3">标题</th>
-            <th className="whitespace-nowrap px-3 py-3">时长</th>
-            {COLS.map((c) => (
-              <th key={c.key} className="whitespace-nowrap px-3 py-3">
-                {c.label}
-              </th>
-            ))}
-            <th className="px-2 py-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {segs.map((s) => (
-            <tr
-              key={s.id}
-              className="group border-b border-line/50 align-top last:border-b-0 hover:bg-panel2/50"
-            >
-              <td className="px-4 py-3 text-[13px] tabular-nums text-faint">{no2(s.no)}</td>
-              <td className="px-3 py-2.5">
-                <TitleCell value={s.title} onCommit={(v) => onRenameTitle(s.id, v.trim() || s.title)} />
-              </td>
-              <td className="px-3 py-3 text-[13px] tabular-nums text-muted">{fmtDur(s.dur)}</td>
-              {COLS.map((c) => {
-                const v = s[c.key]
-                return (
-                  <td key={c.key} className="px-3 py-2.5">
-                    <ReadCell value={v} onClick={(e) => openPop(e, c.label, v)} />
-                  </td>
-                )
-              })}
-              <td className="px-2 py-3">
-                <button
-                  type="button"
-                  title="删除段落"
-                  onClick={() => onDelete(s)}
-                  className="rounded-md p-1.5 text-faint opacity-0 transition-colors hover:bg-red-500/15 hover:text-red-400 group-hover:opacity-100"
-                >
-                  🗑
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {pop && <CellPopover {...pop} onClose={() => setPop(null)} />}
-    </div>
+    <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
+      <Button variant="primary" size="lg" disabled={disabled} onClick={onExtract}>
+        下一步：提取角色与场景 · <Diamond />
+        {COST.assetExtract}
+      </Button>
+    </ActionBar>
   )
 }
 
-/* 标题：可就地编辑（单击进入编辑） */
-function TitleCell({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+/* ---------- 段落卡片 ---------- */
+function ParagraphCard({
+  seg,
+  onRenameTitle,
+  onDelete,
+}: {
+  seg: Segment
+  onRenameTitle: (v: string) => void
+  onDelete: () => void
+}) {
   const [editing, setEditing] = useState(false)
-  if (editing) {
-    return (
-      <InlineRename
-        value={value}
-        onCommit={(v) => {
-          onCommit(v)
-          setEditing(false)
-        }}
-        className="w-full text-[14px] font-medium"
-      />
-    )
-  }
+  const [expanded, setExpanded] = useState(false)
+  const [overflow, setOverflow] = useState(false)
+  const bodyRef = useRef<HTMLParagraphElement>(null)
+
+  // 检测原文是否超过收起高度，决定是否显示「展开」
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    setOverflow(el.scrollHeight - el.clientHeight > 4)
+  }, [seg.text, expanded])
+
   return (
-    <button
-      type="button"
-      title="点击编辑标题"
-      onClick={() => setEditing(true)}
-      className="w-full rounded-md text-left text-[14px] font-medium leading-snug transition-colors hover:text-brand"
-    >
-      {value}
-    </button>
+    <div className="rounded-xl border border-line bg-panel px-5 py-4">
+      <div className="flex items-center gap-3">
+        <span className="text-[13px] tabular-nums text-faint">{no2(seg.no)}</span>
+        {editing ? (
+          <InlineRename
+            value={seg.title}
+            className="text-[15px] font-medium"
+            onCommit={(v) => {
+              onRenameTitle(v)
+              setEditing(false)
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            title="点击编辑标题"
+            onClick={() => setEditing(true)}
+            className="rounded text-left text-[15px] font-medium leading-snug transition-colors hover:text-brand"
+          >
+            {seg.title}
+          </button>
+        )}
+        <span className="text-[13px] tabular-nums text-muted">{fmtDur(seg.dur)}</span>
+        <button
+          type="button"
+          title="删除段落"
+          aria-label="删除段落"
+          onClick={onDelete}
+          className="ml-auto rounded-md p-1.5 text-faint opacity-45 transition-colors hover:bg-red-500/15 hover:text-red-400 hover:opacity-100"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      <div className="relative mt-3">
+        <p
+          ref={bodyRef}
+          className={`whitespace-pre-line text-[13.5px] leading-relaxed text-white/85 ${
+            expanded ? '' : 'max-h-[7.5rem] overflow-hidden'
+          }`}
+        >
+          {seg.text}
+        </p>
+        {!expanded && overflow && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-panel to-transparent" />
+        )}
+      </div>
+
+      {(overflow || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((x) => !x)}
+          className="mt-1.5 inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-white"
+        >
+          {expanded ? (
+            <>
+              收起 <ChevronUp size={14} />
+            </>
+          ) : (
+            <>
+              展开 <ChevronDown size={14} />
+            </>
+          )}
+        </button>
+      )}
+    </div>
   )
 }
 

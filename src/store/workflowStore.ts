@@ -241,6 +241,7 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const no = p.segments.length + 1
         p.segments.push({ id: uid('seg'), no, title: title.trim(), dur: '15s', text: text.trim() })
+        markStaleFromSegments(p)
       })
       get().showToast('已新增剧本段落')
     },
@@ -248,7 +249,11 @@ export const useStore = create<State>((set, get) => {
     updateSegmentTitle: (id, title) => {
       patchProject((p) => {
         const s = p.segments.find((x) => x.id === id)
-        if (s) s.title = title.trim() || s.title
+        if (!s) return
+        const next = title.trim() || s.title
+        if (next === s.title) return // 没变就不置脏
+        s.title = next
+        markStaleFromSegments(p)
       })
     },
 
@@ -256,6 +261,7 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         p.segments = p.segments.filter((x) => x.id !== id)
         p.segments.forEach((s, i) => (s.no = i + 1))
+        markStaleFromSegments(p)
       })
       get().showToast('已删除剧本段落')
     },
