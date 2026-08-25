@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { Download, Maximize, Pause, Play, Volume2, VolumeX, X } from 'lucide-react'
 import type { Shot } from '@/types'
-import { SHOT_FIELDS } from '@/types'
 import { useStore } from '@/store/workflowStore'
+import { no2 } from '@/utils/project'
 
 const DURATION = 15
 const SPEEDS = [0.5, 1, 1.5, 2]
@@ -13,7 +14,6 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
   const [muted, setMuted] = useState(false)
   const [rate, setRate] = useState(1)
   const [speedOpen, setSpeedOpen] = useState(false)
-  const [scriptOpen, setScriptOpen] = useState(false)
   const raf = useRef<number>()
   const last = useRef<number>(performance.now())
   const containerRef = useRef<HTMLDivElement>(null)
@@ -63,9 +63,9 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
       >
         {/* 头部：仅标题 + 关闭 */}
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div className="text-sm">视频 · seg_{String(shot.no).padStart(3, '0')}</div>
-          <button className="text-muted hover:text-white" onClick={onClose}>
-            ✕
+          <div className="text-sm">镜头 {no2(shot.no)}</div>
+          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={18} />
           </button>
         </div>
 
@@ -82,30 +82,10 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
               onClick={() => setPlaying((p) => !p)}
             />
 
-            {/* 生成脚本浮层 */}
-            {scriptOpen && (
-              <div className="absolute inset-0 overflow-y-auto rounded-lg bg-black/85 p-5 text-[13px] leading-relaxed">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="font-semibold text-brand">生成该视频的分镜脚本 · 镜号 {shot.no}</div>
-                  <button className="text-muted hover:text-white" onClick={() => setScriptOpen(false)}>
-                    ✕
-                  </button>
-                </div>
-                <div className="space-y-2.5">
-                  {SHOT_FIELDS.map((f) => (
-                    <div key={f.key}>
-                      <span className="text-brand">{f.label}：</span>
-                      <span className="whitespace-pre-line text-white/80">{String(shot[f.key] ?? '')}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 控件条：播放/时间/进度 + 音量/速度/脚本/下载/全屏 */}
+            {/* 控件条：播放/时间/进度 + 音量/速度/下载/全屏 */}
             <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 rounded-b-lg bg-gradient-to-t from-black/75 to-transparent px-4 py-3">
-              <button className="text-lg" onClick={() => setPlaying((p) => !p)} title={playing ? '暂停' : '播放'}>
-                {playing ? '⏸' : '▶'}
+              <button onClick={() => setPlaying((p) => !p)} title={playing ? '暂停' : '播放'}>
+                {playing ? <Pause size={18} /> : <Play size={18} />}
               </button>
               <span className="text-xs tabular-nums text-white/80">
                 {mmss(t)} / {mmss(DURATION)}
@@ -116,7 +96,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
 
               {/* 音量 */}
               <button className="text-muted hover:text-white" onClick={() => setMuted((m) => !m)} title="音量">
-                {muted ? '🔇' : '🔊'}
+                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
 
               {/* 播放速度 */}
@@ -143,23 +123,14 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
                 )}
               </div>
 
-              {/* 查看生成脚本 */}
-              <button
-                className="text-muted hover:text-white"
-                onClick={() => setScriptOpen((o) => !o)}
-                title="查看生成该视频的脚本"
-              >
-                📄
-              </button>
-
               {/* 下载 */}
               <button className="text-muted hover:text-white" onClick={() => showToast('已开始下载（示意）')} title="下载">
-                ⭳
+                <Download size={18} />
               </button>
 
               {/* 全屏 */}
               <button className="text-muted hover:text-white" onClick={toggleFullscreen} title="全屏">
-                ⛶
+                <Maximize size={18} />
               </button>
             </div>
           </div>
