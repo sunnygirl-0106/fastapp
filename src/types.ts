@@ -52,16 +52,16 @@ export interface ShotVideo {
 export interface Shot {
   id: string
   no: number
-  shot: string // 镜头
-  timeline: string // 时间线（每行一条）
-  action: string // 核心动作
-  anchor: string // 空间锚点
-  motion: string // 运动规则
-  blocking: string // 走位
-  continuity: string // 连续性锁
-  subject: string // 绝对主体
-  forbid: string // 禁止变更
-  background: string // 背景边界
+  shot: string // 画面描述
+  timeline: string // 时间安排（每行一条）
+  action: string // 主要动作
+  anchor: string // 场景位置
+  motion: string // 动作说明
+  blocking: string // 人物位置
+  continuity: string // 连贯要求
+  subject: string // 画面主角
+  forbid: string // 保持不变
+  background: string // 背景范围
   done?: boolean // 分镜是否已完成
   video: ShotVideo
 }

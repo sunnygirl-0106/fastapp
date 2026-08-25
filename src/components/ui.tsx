@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Image as ImageIcon, User } from 'lucide-react'
+import { Check, ChevronDown, Image as ImageIcon, User, X } from 'lucide-react'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -54,8 +54,8 @@ export function Modal({
       <div className="rounded-xl border border-line bg-panel shadow-2xl" style={{ width }}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div className="text-[15px] font-semibold">{title}</div>
-          <button className="text-muted hover:text-white" onClick={onClose}>
-            ✕
+          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={16} />
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>
@@ -97,22 +97,6 @@ export function Button({ children, onClick, variant = 'ghost', disabled, size = 
   )
 }
 
-/* ---------- 状态胶囊 ---------- */
-export function StatusPill({ label, status }: { label: string; status: 'none' | 'generating' | 'done' }) {
-  const map = {
-    none: { dot: 'bg-faint', text: '未开始' },
-    generating: { dot: 'bg-amber-400', text: '生成中' },
-    done: { dot: 'bg-brand', text: '已完成' },
-  }[status]
-  return (
-    <span className="inline-flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5 text-[13px]">
-      <span className="text-muted">{label}</span>
-      <span className={`inline-block h-1.5 w-1.5 rounded-full ${map.dot}`} />
-      <span>{map.text}</span>
-    </span>
-  )
-}
-
 /* ---------- 表单元素 ---------- */
 export function Label({ children, req }: { children: ReactNode; req?: boolean }) {
   return (
@@ -148,7 +132,7 @@ export function FakeSelect({ value }: { value: string }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-2 text-sm">
       <span>{value}</span>
-      <span className="text-faint">▾</span>
+      <ChevronDown size={14} className="text-faint" />
     </div>
   )
 }
@@ -183,7 +167,7 @@ export function ModelSelect({
         className="flex w-full items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm transition-colors hover:border-brand/60"
       >
         <span className="truncate">{value}</span>
-        <span className={`ml-1 shrink-0 text-faint transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+        <ChevronDown size={14} className={`ml-1 shrink-0 text-faint transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
@@ -200,7 +184,7 @@ export function ModelSelect({
               }`}
             >
               <span className="truncate">{o}</span>
-              {o === value && <span className="ml-2 shrink-0">✓</span>}
+              {o === value && <Check size={14} className="ml-2 shrink-0" />}
             </button>
           ))}
         </div>
@@ -278,36 +262,7 @@ export function CostRow({ cost, balance, calculating }: { cost: number; balance:
   )
 }
 
-/* ---------- 通用确认弹窗 ---------- */
-export function ConfirmDialog({
-  text,
-  confirmText = '确认',
-  onConfirm,
-  onCancel,
-  danger,
-}: {
-  text: string
-  confirmText?: string
-  onConfirm: () => void
-  onCancel: () => void
-  danger?: boolean
-}) {
-  return (
-    <Overlay onClose={onCancel}>
-      <div className="w-[360px] rounded-xl border border-line bg-panel p-5 shadow-2xl">
-        <div className="text-sm">{text}</div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button onClick={onCancel}>取消</Button>
-          <Button variant={danger ? 'primary' : 'primary'} onClick={onConfirm}>
-            {confirmText}
-          </Button>
-        </div>
-      </div>
-    </Overlay>
-  )
-}
-
-/* 双击就地改名（表格标题用） */
+/* 就地改名（标题编辑用） */
 export function InlineRename({
   value,
   onCommit,

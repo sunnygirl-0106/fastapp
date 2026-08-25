@@ -1,3 +1,4 @@
+import { Check, ChevronRight } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 
@@ -57,12 +58,12 @@ export default function StepBar({ project }: { project: Project }) {
                   isDone ? 'bg-brand/15 text-brand' : isCurrent ? 'bg-brand text-black' : 'text-faint'
                 }`}
               >
-                {isDone ? '✓' : n}
+                {isDone ? <Check size={12} /> : n}
               </span>
               <span>{name}</span>
             </button>
             {n < STEPS.length && (
-              <span className={`px-1 ${done[i] ? 'text-brand/50' : 'text-faint'}`}>→</span>
+              <ChevronRight size={14} className={`mx-0.5 ${done[i] ? 'text-brand/50' : 'text-faint'}`} />
             )}
           </div>
         )

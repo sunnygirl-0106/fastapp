@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Image as ImageIcon, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, Image as ImageIcon, Plus, Trash2 } from 'lucide-react'
 import { useStore } from '@/store/workflowStore'
 import { ProjectsTopBar } from '@/components/TopBar'
 import { Button, Input, Label, Modal } from '@/components/ui'
@@ -33,7 +33,7 @@ export default function ProjectList() {
         {/* 侧边栏 */}
         <aside className="w-64 shrink-0 border-r border-line/60 px-5 py-4">
           <div className="flex items-center gap-2 text-[17px] font-semibold">
-            <span className="text-muted">‹</span> 工作流
+            <ChevronLeft size={18} className="text-muted" /> 工作流
           </div>
           <div className="mt-3 flex gap-2">
             <span className="rounded bg-panel2 px-2 py-1 text-xs text-muted">9:16 竖屏</span>

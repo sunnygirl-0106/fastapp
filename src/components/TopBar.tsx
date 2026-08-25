@@ -1,3 +1,4 @@
+import { Bell, ChevronLeft } from 'lucide-react'
 import { Diamond, fmt } from './ui'
 
 function RightCluster({ balance }: { balance: number }) {
@@ -8,7 +9,7 @@ function RightCluster({ balance }: { balance: number }) {
         <Diamond />
         <span className="tabular-nums">{fmt(balance)}</span>
       </span>
-      <span className="text-muted">🔔</span>
+      <Bell size={16} className="text-muted" />
       <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-brand/70 to-indigo-500/70 text-[11px] font-bold text-black">
         8
       </span>
@@ -32,8 +33,8 @@ export function WorkflowTopBar({ name, balance, onBack }: { name: string; balanc
   return (
     <header className="flex items-center justify-between px-6 py-4">
       <div className="flex items-center gap-2 text-sm">
-        <button className="text-white/80 hover:text-white" onClick={onBack}>
-          ← 返回
+        <button className="inline-flex items-center gap-1 text-white/80 hover:text-white" onClick={onBack}>
+          <ChevronLeft size={16} /> 返回
         </button>
         <span className="text-brand">{name}</span>
       </div>
