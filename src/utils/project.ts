@@ -49,6 +49,36 @@ export function isDone(p: Project): boolean {
   return p.shots.length > 0 && p.shots.every((s) => s.video.state === 'done')
 }
 
+/**
+ * 项目封面：固定规则自动选取，不随机、不允许用户设置。
+ * 只依赖 no 排序与 assets 数组顺序，不依赖 updatedAt，
+ * 否则新生成一个镜头就会导致封面跳变。
+ */
+export function projectCover(p: Project): string | undefined {
+  // 1. 镜号最靠前的已完成视频封面
+  const doneShots = p.shots
+    .filter((s) => s.video.state === 'done' && s.video.versions[0]?.url)
+    .sort((a, b) => a.no - b.no)
+  if (doneShots.length) return doneShots[0].video.versions[0].url
+
+  // 2. 第一张已生成的场景参考图
+  const scene = p.assets.find((a) => a.kind === 'scene' && a.imgState === 'done' && a.imageUrl)
+  if (scene) return scene.imageUrl
+
+  // 3. 主要角色参考图
+  const major = p.assets.find(
+    (a) => a.kind === 'char' && a.importance === 'major' && a.imgState === 'done' && a.imageUrl,
+  )
+  if (major) return major.imageUrl
+
+  // 4. 任意角色参考图
+  const anyChar = p.assets.find((a) => a.kind === 'char' && a.imgState === 'done' && a.imageUrl)
+  if (anyChar) return anyChar.imageUrl
+
+  // 5. 无 → 调用方渲染统一默认占位
+  return undefined
+}
+
 /* ---------- 展示格式 ---------- */
 export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
 export const fmtDur = (d: string) => d.replace(/s$/i, ' 秒') // '15s' → '15 秒'
