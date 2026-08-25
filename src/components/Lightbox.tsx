@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { Overlay } from './ui'
 
 export default function Lightbox({ title, url, onClose }: { title: string; url?: string; onClose: () => void }) {
@@ -6,8 +7,8 @@ export default function Lightbox({ title, url, onClose }: { title: string; url?:
       <div className="rounded-xl border border-line bg-panel p-3 shadow-2xl">
         <div className="mb-2 flex items-center justify-between px-1">
           <div className="text-sm text-muted">{title} · 参考图</div>
-          <button className="text-muted hover:text-white" onClick={onClose}>
-            ✕
+          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={16} />
           </button>
         </div>
         <div

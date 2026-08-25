@@ -297,11 +297,14 @@ export const useStore = create<State>((set, get) => {
     },
 
     updateAsset: (id, patch) => {
+      let hasImage = false
       patchProject((p) => {
         const a = p.assets.find((x) => x.id === id)
-        if (a) Object.assign(a, patch)
+        if (!a) return
+        hasImage = a.imgState === 'done'
+        Object.assign(a, patch)
       })
-      get().showToast('已保存')
+      get().showToast(hasImage ? '设定已保存，当前参考图不会自动更新' : '设定已保存')
     },
 
     deleteAsset: (id) => {

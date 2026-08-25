@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Image as ImageIcon, User } from 'lucide-react'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -67,7 +68,7 @@ export function Modal({
 /* ---------- 按钮 ---------- */
 type BtnProps = {
   children: ReactNode
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent) => void
   variant?: 'primary' | 'ghost' | 'danger' | 'danger-solid' | 'soft'
   disabled?: boolean
   size?: 'sm' | 'md' | 'lg'
@@ -476,13 +477,14 @@ export function ReadonlyField({ label, value }: { label: string; value?: string 
   )
 }
 
-/* ---------- 参考图占位（柔和渐变 + 图标） ---------- */
-export function RefPlaceholder({ kind }: { kind: 'char' | 'scene' }) {
+/* ---------- 参考图空态（图标 + 名称 + 待生成参考图） ---------- */
+export function RefPlaceholder({ kind, name }: { kind: 'char' | 'scene'; name?: string }) {
+  const Icon = kind === 'char' ? User : ImageIcon
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-[#20242b] via-[#191b20] to-[#141519]">
-      <span className="text-2xl opacity-50">{kind === 'char' ? '👤' : '🏙'}</span>
-      <span className="text-xs text-muted">暂无参考图</span>
-      <span className="text-[11px] text-faint">生成或上传参考图</span>
+    <div className="flex h-full w-full flex-col items-center justify-center gap-1.5">
+      <Icon size={30} className="text-faint opacity-40" />
+      {name && <span className="mt-1 text-[17px] font-semibold text-white">{name}</span>}
+      <span className="text-[12px] text-faint">待生成参考图</span>
     </div>
   )
 }
