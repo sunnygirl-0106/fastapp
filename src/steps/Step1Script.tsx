@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -12,6 +13,7 @@ export default function Step1Script({ project }: { project: Project }) {
   const [confirm, setConfirm] = useState(false)
   const [model, setModel] = useState<string>(MODELS.text)
   const t = useRef<ReturnType<typeof setTimeout>>()
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => setText(project.script), [project.id])
 
@@ -23,6 +25,18 @@ export default function Step1Script({ project }: { project: Project }) {
       setScript(v)
       setStatus('saved')
     }, 700)
+  }
+
+  // 上传剧本文件：读取纯文本内容，有内容则追加，否则填入
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // 允许重复选择同一文件
+    if (!file) return
+    const raw = await file.text()
+    const content = raw.replace(/\r\n/g, '\n').trim()
+    if (!content) return
+    const next = text.trim() ? `${text.trim()}\n\n${content}` : content
+    onChange(next)
   }
 
   const chars = text.trim().length
@@ -41,6 +55,23 @@ export default function Step1Script({ project }: { project: Project }) {
       <PageHeader
         title="添加剧本内容"
         desc="粘贴小说、短剧剧本或剧本梗概，AI 将把内容拆解成适合生成视频的剧本段落。"
+        right={
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-1.5 text-[13px] text-muted transition-colors hover:text-white"
+          >
+            <Upload size={14} className="text-faint" />
+            上传剧本
+          </button>
+        }
+      />
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".txt,.md,.markdown,.fountain,text/plain,text/markdown"
+        onChange={onPickFile}
+        className="hidden"
       />
 
       <textarea

@@ -57,7 +57,7 @@ export interface Shot {
   action: string // 主要动作
   anchor: string // 场景位置
   motion: string // 动作说明
-  blocking: string // 人物位置
+  blocking: string // 走位说明
   continuity: string // 连贯要求
   subject: string // 画面主角
   forbid: string // 保持不变
@@ -92,7 +92,7 @@ export const SHOT_FIELDS: { key: keyof Shot; label: string }[] = [
   { key: 'action', label: '主要动作' },
   { key: 'anchor', label: '场景位置' },
   { key: 'motion', label: '动作说明' },
-  { key: 'blocking', label: '人物位置' },
+  { key: 'blocking', label: '走位说明' },
   { key: 'continuity', label: '连贯要求' },
   { key: 'subject', label: '画面主角' },
   { key: 'forbid', label: '保持不变' },

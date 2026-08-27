@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import type { Project, Segment } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -225,16 +225,16 @@ function ParagraphCard({
   onDelete: () => void
 }) {
   const [editing, setEditing] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [open, setOpen] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const bodyRef = useRef<HTMLParagraphElement>(null)
 
-  // 检测原文是否超过收起高度，决定是否显示「展开」
+  // 检测原文是否超过收起高度，决定是否显示底部渐隐提示
   useLayoutEffect(() => {
     const el = bodyRef.current
     if (!el) return
     setOverflow(el.scrollHeight - el.clientHeight > 4)
-  }, [seg.text, expanded])
+  }, [seg.text])
 
   return (
     <div className="rounded-xl border border-line bg-panel px-5 py-4">
@@ -272,36 +272,44 @@ function ParagraphCard({
       </div>
 
       <div className="relative mt-3">
-        <p
-          ref={bodyRef}
-          className={`whitespace-pre-line text-[13.5px] leading-relaxed text-white/85 ${
-            expanded ? '' : 'max-h-[7.5rem] overflow-hidden'
-          }`}
-        >
-          {seg.text}
-        </p>
-        {!expanded && overflow && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-panel to-transparent" />
-        )}
-      </div>
-
-      {(overflow || expanded) && (
+        {/* 收起态：点击正文原地展开只读弹窗 */}
         <button
           type="button"
-          onClick={() => setExpanded((x) => !x)}
-          className="mt-1.5 inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-white"
+          title="点击查看完整原文"
+          onClick={() => setOpen(true)}
+          className="group/body block w-full cursor-pointer text-left"
         >
-          {expanded ? (
-            <>
-              收起 <ChevronUp size={14} />
-            </>
-          ) : (
-            <>
-              展开 <ChevronDown size={14} />
-            </>
+          <p
+            ref={bodyRef}
+            className="max-h-[7.5rem] overflow-hidden whitespace-pre-line text-[13.5px] leading-relaxed text-white/85 transition-colors group-hover/body:text-white"
+          >
+            {seg.text}
+          </p>
+          {overflow && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-panel to-transparent" />
           )}
         </button>
-      )}
+
+        {/* 展开态：原地浮层，微微高亮框，只读 */}
+        {open && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+            <div className="absolute -inset-x-1 -top-1 z-30 rounded-xl border border-brand/45 bg-panel2/95 px-4 py-3 shadow-xl shadow-black/50 ring-1 ring-brand/15 backdrop-blur">
+              <p className="whitespace-pre-line text-[13.5px] leading-relaxed text-white/90">{seg.text}</p>
+              <div className="mt-3 flex items-center justify-between border-t border-line/50 pt-2">
+                <span className="text-[12px] text-faint">只读</span>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="text-[12px] text-muted transition-colors hover:text-white"
+                >
+                  收起
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

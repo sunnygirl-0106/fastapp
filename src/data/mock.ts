@@ -156,11 +156,3 @@ export function sampleShots(): Shot[] {
     },
   ]
 }
-
-// 一段渐变作为资产/视频缩略图占位（种子决定色相）
-export function placeholderGradient(seed: string): string {
-  let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360
-  const h2 = (h + 40) % 360
-  return `linear-gradient(135deg, hsl(${h} 45% 28%), hsl(${h2} 40% 16%))`
-}

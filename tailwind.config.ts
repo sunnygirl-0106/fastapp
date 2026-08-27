@@ -10,8 +10,8 @@ export default {
         panel: '#141416', // 卡片/面板
         panel2: '#1c1c1f', // 次级面板/输入
         line: '#2a2a2e', // 分隔线
-        brand: '#33e1d2', // 品牌青
-        'brand-dim': '#2bbcb0',
+        brand: '#7fd0b8', // 品牌青绿（再绿一点）
+        'brand-dim': '#5cbba0',
         muted: '#8a8a90',
         faint: '#5f5f66',
       },

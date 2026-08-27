@@ -298,25 +298,6 @@ export function MenuItem({
   )
 }
 
-/* ---------- 成本行（模型 / 消耗 / 余额，含"计算中"过渡） ---------- */
-export function CostRow({ cost, balance, calculating }: { cost: number; balance: number; calculating?: boolean }) {
-  return (
-    <div className="mt-3 flex items-center gap-2 text-[13px] text-muted">
-      {calculating ? (
-        <span className="inline-flex items-center gap-2">
-          <Spinner size={12} /> 合计预估中…
-        </span>
-      ) : (
-        <>
-          <Diamond />
-          <span className="font-medium text-white">{fmt(cost)}</span>
-          <span className="text-faint">余额：{fmt(balance)} 星钻</span>
-        </>
-      )}
-    </div>
-  )
-}
-
 /* 就地改名（标题编辑用） */
 export function InlineRename({
   value,

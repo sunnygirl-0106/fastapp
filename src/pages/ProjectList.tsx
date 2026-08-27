@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronLeft, Image as ImageIcon, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, Image as ImageIcon, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useStore } from '@/store/workflowStore'
 import { ProjectsTopBar } from '@/components/TopBar'
 import { Button, Input, Label, Modal } from '@/components/ui'
@@ -10,18 +10,34 @@ export default function ProjectList() {
   const projects = useStore((s) => s.projects)
   const openProject = useStore((s) => s.openProject)
   const createProject = useStore((s) => s.createProject)
+  const renameProject = useStore((s) => s.renameProject)
   const deleteProject = useStore((s) => s.deleteProject)
   const balance = projects[0]?.balance ?? DEFAULT_BALANCE
 
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')
+  const [menuId, setMenuId] = useState<string | null>(null)
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [renameId, setRenameId] = useState<string | null>(null)
+  const [renameName, setRenameName] = useState('')
 
   const submit = () => {
     if (!name.trim()) return
     createProject(name)
     setName('')
     setCreateOpen(false)
+  }
+
+  const startRename = (id: string, current: string) => {
+    setMenuId(null)
+    setRenameId(id)
+    setRenameName(current)
+  }
+
+  const submitRename = () => {
+    if (!renameId || !renameName.trim()) return
+    renameProject(renameId, renameName)
+    setRenameId(null)
   }
 
   const delTarget = projects.find((p) => p.id === confirmDel)
@@ -93,24 +109,78 @@ export default function ProjectList() {
                     <div className="mt-1 text-xs text-faint">{formatCreatedAt(p.createdAt)}</div>
                   </div>
 
-                  {/* 删除：默认弱显示（触控设备也可见），hover/focus 变红 */}
-                  <button
-                    title="删除项目"
-                    aria-label="删除项目"
-                    className="absolute right-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 opacity-45 transition hover:bg-black/70 hover:text-red-400 hover:opacity-100 focus:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setConfirmDel(p.id)
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {/* 更多操作：默认隐藏，hover 卡片或菜单展开时显示 */}
+                  <div className="absolute right-2.5 top-2.5">
+                    <button
+                      title="更多操作"
+                      aria-label="更多操作"
+                      className={`flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 backdrop-blur-sm transition hover:bg-black/70 hover:text-white focus:opacity-100 ${
+                        menuId === p.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuId(menuId === p.id ? null : p.id)
+                      }}
+                    >
+                      <MoreVertical size={15} />
+                    </button>
+
+                    {menuId === p.id && (
+                      <div
+                        className="absolute right-0 top-8 z-20 w-36 overflow-hidden rounded-lg border border-line/70 bg-panel2 py-1 shadow-xl shadow-black/40"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-white/90 transition hover:bg-white/5"
+                          onClick={() => startRename(p.id, p.name)}
+                        >
+                          <Pencil size={14} className="text-muted" /> 重命名
+                        </button>
+                        <button
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-red-400 transition hover:bg-red-500/10"
+                          onClick={() => {
+                            setMenuId(null)
+                            setConfirmDel(p.id)
+                          }}
+                        >
+                          <Trash2 size={14} /> 删除
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
         </main>
       </div>
+
+      {/* 点击空白关闭卡片菜单 */}
+      {menuId && <div className="fixed inset-0 z-10" onClick={() => setMenuId(null)} />}
+
+      {renameId && (
+        <Modal
+          title="重命名项目"
+          width={380}
+          onClose={() => setRenameId(null)}
+          footer={
+            <>
+              <Button onClick={() => setRenameId(null)}>取消</Button>
+              <Button variant="primary" disabled={!renameName.trim()} onClick={submitRename}>
+                保存
+              </Button>
+            </>
+          }
+        >
+          <Label>项目名称</Label>
+          <Input
+            autoFocus
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submitRename()}
+          />
+        </Modal>
+      )}
 
       {createOpen && (
         <Modal

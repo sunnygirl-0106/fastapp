@@ -22,6 +22,7 @@ interface State {
 
   // 项目
   createProject: (name: string) => void
+  renameProject: (id: string, name: string) => void
   deleteProject: (id: string) => void
 
   // step1 故事
@@ -221,6 +222,16 @@ export const useStore = create<State>((set, get) => {
       const projects = [p, ...get().projects]
       persist(projects)
       set({ projects, currentId: p.id, screen: 'workflow', step: 1 })
+    },
+
+    renameProject: (id, name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const projects = get().projects.map((p) =>
+        p.id === id ? { ...p, name: trimmed, updatedAt: Date.now() } : p,
+      )
+      persist(projects)
+      set({ projects })
     },
 
     deleteProject: (id) => {

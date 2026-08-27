@@ -67,3 +67,42 @@ body {
     transform: translateX(100%);
   }
 }
+
+/* 筛选命中定位：左右光波扫过，示意「就是这一条镜头」 */
+.row-flash {
+  position: relative;
+  overflow: hidden; /* 裁掉扫光溢出，避免出现横向滚动条 */
+}
+.row-flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(147, 209, 196, 0.14) 42%,
+    rgba(147, 209, 196, 0.3) 50%,
+    rgba(147, 209, 196, 0.14) 58%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: rowFlash 1.4s ease-in-out 2;
+}
+@keyframes rowFlash {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}

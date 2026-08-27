@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react'
-import { MoreHorizontal, Pencil } from 'lucide-react'
+import { MoreHorizontal, Pencil, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { COST, MODELS } from '@/services/generation'
+import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
 import {
   ActionBar,
   Button,
@@ -13,6 +13,8 @@ import {
   Label,
   MenuItem,
   Modal,
+  ModelSelect,
+  Overlay,
   PageHeader,
   Popover,
   RefPlaceholder,
@@ -104,7 +106,7 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {/* 底部主操作栏：两种形态 */}
       {missing.length > 0 ? (
-        <ActionBar left={`共 ${missing.length} 张参考图，每张 ${COST.assetImgEach} 星钻`}>
+        <ActionBar>
           <button className="text-[13px] text-muted hover:text-white" onClick={() => setShotOpen(true)}>
             跳过参考图，继续生成镜头
           </button>
@@ -145,7 +147,8 @@ export default function Step3Assets({ project }: { project: Project }) {
           assets={missing}
           balance={project.balance}
           onClose={() => setBatchOpen(false)}
-          onGen={async (ids) => {
+          onGen={async (ids, edits) => {
+            Object.entries(edits).forEach(([id, prompt]) => updateAsset(id, { prompt }))
             setBatchOpen(false)
             await generateAssetImages(ids)
           }}
@@ -154,18 +157,13 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {/* 单张生成参考图 */}
       {genFor && (
-        <GenerateConfirmModal
-          title={`生成${genFor.kind === 'char' ? '角色' : '场景'}参考图`}
-          what={`将为「${genFor.name}」生成一张参考图。`}
-          count="1 张参考图"
-          modelLabel="图片模型"
-          model={MODELS.image}
-          cost={COST.assetImgEach}
+        <GenAssetImageModal
+          a={genFor}
           balance={project.balance}
-          confirmText="确认生成参考图"
           onClose={() => setGenFor(null)}
-          onConfirm={async () => {
+          onConfirm={async (patch) => {
             const id = genFor.id
+            if (patch.prompt !== genFor.prompt) updateAsset(id, { prompt: patch.prompt })
             setGenFor(null)
             await generateAssetImages([id])
           }}
@@ -366,6 +364,65 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
   )
 }
 
+/* 单张参考图生成：大图弹窗 —— 可编辑提示词 + 模型/比例/分辨率 + 消耗 */
+function GenAssetImageModal({
+  a,
+  balance,
+  onClose,
+  onConfirm,
+}: {
+  a: Asset
+  balance: number
+  onClose: () => void
+  onConfirm: (patch: { prompt: string }) => void
+}) {
+  const kindCn = a.kind === 'char' ? '角色' : '场景'
+  const [prompt, setPrompt] = useState(a.prompt)
+  const [model, setModel] = useState<string>(MODELS.image)
+  const [ratio, setRatio] = useState('9:16')
+  const [res, setRes] = useState('1K')
+  const cost = COST.assetImgEach
+  const ok = prompt.trim().length > 0
+
+  return (
+    <Modal title={`AI 生成${kindCn}参考图 · ${a.name}`} width={880} onClose={onClose}>
+      <Textarea
+        rows={9}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
+        className="text-[13.5px] leading-relaxed"
+      />
+
+      <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div>
+          <Label>图片模型</Label>
+          <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} width={176} />
+        </div>
+        <div>
+          <Label>画面比例</Label>
+          <ModelSelect value={ratio} options={['9:16', '16:9', '1:1', '4:3', '3:4']} onChange={setRatio} width={104} />
+        </div>
+        <div>
+          <Label>分辨率</Label>
+          <ResChips value={res} onChange={setRes} />
+        </div>
+
+        <div className="ml-auto flex items-center gap-5">
+          <div className="text-[13px] text-muted">
+            合计预计消耗 <span className="font-semibold text-brand">{fmt(cost)}</span> 星钻（1 张）
+          </div>
+          <Button variant="primary" disabled={!ok} onClick={() => onConfirm({ prompt })}>
+            确认生成
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3 text-[12px] text-faint">当前余额 {fmt(balance)} 星钻 · 提示词可编辑，将用于本次生成</div>
+    </Modal>
+  )
+}
+
 function BatchModal({
   assets,
   balance,
@@ -375,55 +432,114 @@ function BatchModal({
   assets: Asset[]
   balance: number
   onClose: () => void
-  onGen: (ids: string[]) => void
+  onGen: (ids: string[], edits: Record<string, string>) => void
 }) {
   const [sel, setSel] = useState<string[]>(assets.map((a) => a.id))
+  const [prompts, setPrompts] = useState<Record<string, string>>(
+    Object.fromEntries(assets.map((a) => [a.id, a.prompt])),
+  )
+  const [model, setModel] = useState<string>(MODELS.image)
+  const [ratio, setRatio] = useState('9:16')
   const [res, setRes] = useState('1K')
+
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-  const nChar = assets.filter((a) => a.kind === 'char').length
-  const nScene = assets.filter((a) => a.kind === 'scene').length
-  const what = `将为 ${nChar} 个角色和 ${nScene} 个场景生成参考图。`
+  const allOn = sel.length === assets.length
+  const toggleAll = () => setSel(allOn ? [] : assets.map((a) => a.id))
+
+  const chars = assets.filter((a) => a.kind === 'char')
+  const scenes = assets.filter((a) => a.kind === 'scene')
+  const cost = sel.length * COST.assetImgEach
+
+  const confirm = () => {
+    if (!sel.length) return
+    const edits: Record<string, string> = {}
+    sel.forEach((id) => {
+      const a = assets.find((x) => x.id === id)
+      if (a && prompts[id] !== a.prompt) edits[id] = prompts[id]
+    })
+    onGen(sel, edits)
+  }
+
+  const renderGroup = (title: string, list: Asset[], kindCn: string) =>
+    list.length === 0 ? null : (
+      <div className="mb-5">
+        <div className="mb-2.5 text-[14px] font-semibold text-brand">
+          {title}（{list.length}）
+        </div>
+        <div className="space-y-3">
+          {list.map((a) => {
+            const on = sel.includes(a.id)
+            return (
+              <div
+                key={a.id}
+                className="rounded-xl border border-line/60 bg-panel2/30 px-4 py-3 transition-colors focus-within:bg-panel2/60"
+              >
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" checked={on} onChange={() => toggle(a.id)} className="accent-brand" />
+                  <span className={`text-[14px] font-medium ${on ? 'text-brand' : 'text-white/80'}`}>{a.name}</span>
+                  <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">{kindCn}</span>
+                </label>
+                <Textarea
+                  rows={3}
+                  dim
+                  value={prompts[a.id] ?? ''}
+                  onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
+                  className="mt-2.5 text-[13px] leading-relaxed"
+                  placeholder={`描述「${a.name}」的外观与画面风格`}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
 
   return (
-    <GenerateConfirmModal
-      title="生成参考图"
-      what={what}
-      count={`${sel.length} 张参考图`}
-      modelLabel="图片模型"
-      model={MODELS.image}
-      cost={sel.length * COST.assetImgEach}
-      balance={balance}
-      confirmText={`确认生成 ${sel.length} 张参考图`}
-      disabled={!sel.length}
-      width={520}
-      onClose={onClose}
-      onConfirm={() => onGen(sel)}
-      extra={
-        <div>
-          <div className="mb-2 text-[13px] text-muted">
-            已选择 {sel.length}/{assets.length}
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[86vh] w-[880px] max-w-[92vw] flex-col rounded-xl border border-line bg-panel shadow-2xl">
+        {/* 头部 */}
+        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+          <div className="text-[15px] font-semibold">一键补全参考图</div>
+          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* 列表（可滚动） */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {renderGroup('角色', chars, '角色')}
+          {renderGroup('场景', scenes, '场景')}
+        </div>
+
+        {/* 底部控制条 */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line px-5 py-3.5">
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
+            <input type="checkbox" checked={allOn} onChange={toggleAll} className="accent-brand" />
+            已选 {sel.length}/{assets.length}
+          </label>
+          <div>
+            <div className="mb-1 text-[12px] text-muted">图片模型</div>
+            <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} width={160} />
           </div>
-          <div className="max-h-[240px] space-y-2 overflow-y-auto">
-            {assets.map((a) => (
-              <label
-                key={a.id}
-                className="flex items-center gap-2 rounded-lg border border-line/60 bg-panel2/50 px-3 py-2 text-[13px]"
-              >
-                <input type="checkbox" checked={sel.includes(a.id)} onChange={() => toggle(a.id)} className="accent-brand" />
-                <span className="text-white">{a.name}</span>
-                <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">
-                  {a.kind === 'char' ? '角色' : '场景'}
-                </span>
-              </label>
-            ))}
+          <div>
+            <div className="mb-1 text-[12px] text-muted">画面比例</div>
+            <ModelSelect value={ratio} options={['9:16', '16:9', '1:1', '4:3', '3:4']} onChange={setRatio} width={100} />
           </div>
-          <div className="mt-3 flex items-center gap-4">
-            <span className="text-[13px] text-muted">分辨率</span>
+          <div>
+            <div className="mb-1 text-[12px] text-muted">分辨率</div>
             <ResChips value={res} onChange={setRes} />
           </div>
+          <div className="ml-auto flex items-center gap-5">
+            <div className="text-[13px] text-muted">
+              合计预计消耗 <span className="font-semibold text-brand">{fmt(cost)}</span> 星钻（{sel.length} 张）
+            </div>
+            <Button variant="primary" disabled={!sel.length} onClick={confirm}>
+              生成（{sel.length}）
+            </Button>
+          </div>
         </div>
-      }
-    />
+      </div>
+    </Overlay>
   )
 }
 
