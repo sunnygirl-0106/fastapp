@@ -838,19 +838,7 @@ function InlineCellEditor({
             />
             <div className="flex items-center justify-between border-t border-line/60 px-4 py-2">
               <span className="text-[12px] text-faint">自动保存</span>
-              <div className="flex items-center gap-2">
-                <SaveBadge status={status} />
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    close()
-                  }}
-                  className="text-[12px] text-muted transition-colors hover:text-white"
-                >
-                  完成
-                </button>
-              </div>
+              <SaveBadge status={status} />
             </div>
           </div>
         </div>
