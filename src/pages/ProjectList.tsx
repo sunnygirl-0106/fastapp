@@ -54,8 +54,19 @@ export default function ProjectList() {
         {/* 侧边栏 */}
         <aside className="w-[200px] shrink-0 border-r border-white/5 bg-white/5 py-4">
           <div className="flex flex-col gap-3 px-4">
-            <div className="flex items-center gap-2 text-base text-white">
-              <ChevronLeft size={16} className="text-[#9b9b9b]" /> 工作流
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2 text-lg font-medium text-white">
+                <ChevronLeft size={18} className="text-[#9b9b9b]" /> 工作流
+              </div>
+              {/* 画面比例 / 风格标签（对齐 Figma node 6:1601） */}
+              <div className="flex items-center gap-1">
+                <span className="rounded bg-brand/20 px-2 py-[5px] text-[10px] leading-none text-accent-tag backdrop-blur-[6px]">
+                  {cfg?.ratio ?? '9:16 竖屏'}
+                </span>
+                <span className="rounded bg-brand/20 px-2 py-[5px] text-[10px] leading-none text-accent-tag backdrop-blur-[6px]">
+                  {cfg?.style ?? '写实'}
+                </span>
+              </div>
             </div>
             <div className="rounded-lg bg-white/5 p-3 backdrop-blur-[6px]">
               <div className="text-[10px] text-white/40">当前模式</div>
