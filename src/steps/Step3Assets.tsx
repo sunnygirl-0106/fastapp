@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { MoreVertical, X } from 'lucide-react'
+import { Eraser, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -9,7 +9,6 @@ import {
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
-  MenuItem,
   ModelSelect,
   Overlay,
   PageHeader,
@@ -219,34 +218,60 @@ export default function Step3Assets({ project }: { project: Project }) {
       )}
 
       {menu && (
-        <Popover anchor={menu} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
+        <Popover anchor={menu} width={168} variant="glass" onClose={() => setMenu(null)}>
+          <MenuRow icon={<Image size={16} />} onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
             选择本地图片
-          </MenuItem>
-          <MenuItem onClick={() => { setGenFor(menu.a); setMenu(null) }}>
+          </MenuRow>
+          <MenuRow icon={<Sparkles size={16} />} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
             {menu.a.imgState === 'done' ? 'AI 重新生成图片' : 'AI 生成图片'}
-          </MenuItem>
-          <MenuItem onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
+          </MenuRow>
+          <MenuRow icon={<Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
             编辑{menu.a.kind === 'char' ? '角色' : '场景'}设定
-          </MenuItem>
-          <MenuItem
+          </MenuRow>
+          <MenuRow
+            icon={<Eraser size={16} />}
             disabled={menu.a.imgState !== 'done'}
             onClick={() => { clearAssetImage(menu.a.id); setMenu(null) }}
           >
             清除参考图
-          </MenuItem>
-          <MenuItem danger onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
+          </MenuRow>
+          <MenuRow icon={<Trash2 size={16} />} onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
             删除{menu.a.kind === 'char' ? '角色' : '场景'}
-          </MenuItem>
+          </MenuRow>
         </Popover>
       )}
     </div>
   )
 
+  // 菜单定位在点击位置的右下方（left 取按钮右缘）
   function openMenu(a: Asset, e: React.MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setMenu({ a, top: r.bottom + 4, left: r.left - 150 })
+    setMenu({ a, top: r.bottom + 6, left: r.right + 6 })
   }
+}
+
+/* 玻璃菜单行：16px 图标 + 14px 文案（对齐 Figma node 6:3206） */
+function MenuRow({
+  icon,
+  children,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode
+  children: ReactNode
+  onClick?: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className="flex items-center gap-2 text-[14px] text-white/90 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <span className="shrink-0 text-white/80">{icon}</span>
+      {children}
+    </button>
+  )
 }
 
 function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
