@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, X } from 'lucide-react'
 import type { Project, Segment } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -10,12 +10,10 @@ import {
   GenerateConfirmModal,
   GeneratingState,
   InlineRename,
-  Input,
-  Label,
   Modal,
   ModelSelect,
+  Overlay,
   PageHeader,
-  Textarea,
 } from '@/components/ui'
 
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
@@ -365,39 +363,56 @@ function AddSegModal({
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const ok = title.trim() && text.trim()
+  const boxCls =
+    'w-full resize-none rounded-lg border border-transparent bg-black/40 px-3 py-2.5 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
   return (
-    <Modal
-      title="新增剧本段落"
-      width={480}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            variant="primary"
-            disabled={!ok}
-            onClick={() => {
-              onAdd(title, text)
-              onClose()
-            }}
-          >
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[86vh] w-[520px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+        {/* 头部 */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">新增剧本段落</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* 内容 */}
+        <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
+          <div className="flex flex-col gap-2">
+            <div className="text-[14px] text-white/60">段落编号（自动）</div>
+            <div className="w-fit rounded-md bg-black/40 px-3 py-1.5 text-[15px] tabular-nums text-white">
+              {no2(nextNo)}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-[14px] text-white/60">段落标题</div>
+            <input
+              placeholder="例如：苏可推门对峙"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className={boxCls}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-[14px] text-white/60">剧本原文</div>
+            <textarea
+              rows={5}
+              placeholder="填入该段剧本原文，用于后续提取角色与生成镜头"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              className={boxCls}
+            />
+          </div>
+        </div>
+
+        {/* 底部 */}
+        <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
+          <PillOutline onClick={onClose}>取消</PillOutline>
+          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text); onClose() }}>
             添加
-          </Button>
-        </>
-      }
-    >
-      <Label>段落编号（自动）</Label>
-      <div className="mb-3 inline-block rounded bg-panel2 px-3 py-1.5 text-sm tabular-nums">{no2(nextNo)}</div>
-      <Label req>段落标题</Label>
-      <Input placeholder="例如：苏可推门对峙" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="h-3" />
-      <Label req>剧本原文</Label>
-      <Textarea
-        rows={5}
-        placeholder="填入该段剧本原文，用于后续提取角色与生成镜头"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-    </Modal>
+          </PillPrimary>
+        </div>
+      </div>
+    </Overlay>
   )
 }
