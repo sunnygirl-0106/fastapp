@@ -160,7 +160,7 @@ export default function Step5Video({ project }: { project: Project }) {
 
       {info && (
         <Overlay onClose={() => setInfo(null)}>
-          <div className="flex max-h-[86vh] w-[680px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+          <div className="flex max-h-[80vh] w-[800px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
             {/* 头部 */}
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
               <div className="text-base font-medium text-white">镜头信息 {no2(info.no)}</div>
