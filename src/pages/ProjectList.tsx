@@ -160,9 +160,8 @@ export default function ProjectList() {
                         <span className={`shrink-0 text-xs ${done ? 'text-accent' : 'text-white/80'}`}>{status}</span>
                       )}
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-white/40">
+                    <div className="mt-2 flex items-center text-xs text-white/40">
                       <span>{formatCreatedAt(p.createdAt)}</span>
-                      {cfg && <span>{p.config.ratio}｜{p.config.style}</span>}
                     </div>
                   </div>
                 </div>

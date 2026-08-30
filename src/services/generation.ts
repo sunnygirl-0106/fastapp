@@ -1,5 +1,16 @@
 // mock 生成/计费服务 —— 唯一替换点：日后把 delay() 换成真实 API 请求即可
 
+// 真实占位图池（开源免费图片，本地打包，纯前端离线可用）
+// —— 用于让"已生成的参考图/视频封面"看起来接近真实效果，替代早期的灰色渐变占位
+import frame1 from '@/assets/placeholders/frame-1.jpg'
+import frame2 from '@/assets/placeholders/frame-2.jpg'
+import frame3 from '@/assets/placeholders/frame-3.jpg'
+import frame4 from '@/assets/placeholders/frame-4.jpg'
+import frame5 from '@/assets/placeholders/frame-5.jpg'
+import frame6 from '@/assets/placeholders/frame-6.jpg'
+
+const IMAGE_POOL = [frame1, frame2, frame3, frame4, frame5, frame6]
+
 export const COST = {
   segGen: 50, // 拆解故事           → ✦50
   assetExtract: 250, // 提取角色与场景     → ✦250
@@ -26,21 +37,12 @@ export function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-// 生成参考图/视频用的"缩略图"（mock 用 data-uri SVG，纯前端可离线）
-export function mockImage(label: string, seed: string): string {
+// 生成参考图/视频用的"缩略图"：从真实占位图池里按 seed 稳定取一张
+// 同一资产/镜头始终对应同一张图；不同对象分散取图，接近真实生成效果
+export function mockImage(_label: string, seed: string): string {
   let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360
-  const h2 = (h + 40) % 360
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="hsl(${h} 45% 30%)"/>
-      <stop offset="1" stop-color="hsl(${h2} 40% 15%)"/>
-    </linearGradient></defs>
-    <rect width="480" height="300" fill="url(#g)"/>
-    <text x="50%" y="50%" fill="rgba(255,255,255,.55)" font-family="sans-serif"
-      font-size="20" text-anchor="middle" dominant-baseline="middle">${label}</text>
-  </svg>`
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
+  return IMAGE_POOL[h % IMAGE_POOL.length]
 }
 
 let seq = 0

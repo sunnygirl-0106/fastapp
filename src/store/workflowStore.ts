@@ -3,7 +3,7 @@ import type { Asset, Project, Shot } from '@/types'
 import { COST, delay, mockImage, uid } from '@/services/generation'
 import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
 
-const LS_KEY = 'phanthy.projects.v1'
+const LS_KEY = 'phanthy.projects.v2'
 
 type Screen = 'projects' | 'workflow'
 
