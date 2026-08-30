@@ -8,7 +8,6 @@ import { no2, fmtDur } from '@/utils/project'
 import { useAutoSave } from '@/hooks/useAutoSave'
 import {
   ActionBar,
-  Button,
   GeneratingState,
   MenuItem,
   PageHeader,
@@ -205,9 +204,7 @@ export default function Step4Shots({ project }: { project: Project }) {
           phases={['正在设计画面构图…', '正在整理人物动作…', '正在检查镜头连贯性…']}
         />
         <ActionBar>
-          <Button variant="primary" size="lg" disabled>
-            正在生成镜头设计…
-          </Button>
+          <PillCTA disabled>正在生成镜头设计…</PillCTA>
         </ActionBar>
       </>
     )
