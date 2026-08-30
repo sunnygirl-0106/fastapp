@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Download, Monitor, MoreVertical, Play } from 'lucide-react'
+import { Download, Monitor, MoreVertical, Play, X } from 'lucide-react'
 import type { Project, Shot } from '@/types'
 import { SHOT_GROUPS, SHOT_FIELDS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { no2 } from '@/utils/project'
-import { ActionBar, Modal, PageHeader, Popover, ReadonlyField } from '@/components/ui'
+import { ActionBar, Overlay, PageHeader, Popover } from '@/components/ui'
 import VideoPlayer from '@/components/VideoPlayer'
 import generatingPlaceholder from '@/assets/video-generating-placeholder.png'
 
@@ -114,7 +114,8 @@ export default function Step5Video({ project }: { project: Project }) {
                     title="更多"
                     onClick={(e) => {
                       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                      setMenu({ s, top: r.bottom + 4, left: r.left - 140 })
+                      // 菜单定位在点击位置的右下方
+                      setMenu({ s, top: r.bottom + 6, left: r.right + 6 })
                     }}
                   >
                     <MoreVertical size={18} />
@@ -158,18 +159,34 @@ export default function Step5Video({ project }: { project: Project }) {
       )}
 
       {info && (
-        <Modal title={`镜头信息 ${no2(info.no)}`} width={640} onClose={() => setInfo(null)}>
-          <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
-            {SHOT_GROUPS.map((g) => (
-              <div key={g.title}>
-                <div className="mb-2 text-xs uppercase tracking-wide text-faint">{g.title}</div>
-                {g.fields.map((k) => (
-                  <ReadonlyField key={k} label={labelOf(k)} value={String(info[k] ?? '')} />
-                ))}
-              </div>
-            ))}
+        <Overlay onClose={() => setInfo(null)}>
+          <div className="flex max-h-[86vh] w-[680px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+            {/* 头部 */}
+            <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+              <div className="text-base font-medium text-white">镜头信息 {no2(info.no)}</div>
+              <button className="text-white/50 transition-colors hover:text-white" onClick={() => setInfo(null)} aria-label="关闭">
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* 内容：只读，滑条仅悬浮时显示 */}
+            <div className="table-scroll flex flex-col gap-6 overflow-y-auto px-6 py-6">
+              {SHOT_GROUPS.map((g) => (
+                <div key={g.title} className="flex flex-col gap-4">
+                  <div className="text-[16px] font-medium leading-[18px] text-white/90">{g.title}</div>
+                  {g.fields.map((k) => (
+                    <div key={k} className="flex flex-col gap-2">
+                      <div className="text-[12px] leading-[18px] text-white/40">{labelOf(k)}</div>
+                      <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">
+                        {String(info[k] ?? '') || '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
-        </Modal>
+        </Overlay>
       )}
 
       {play && <VideoPlayer shot={play} onClose={() => setPlay(null)} />}
