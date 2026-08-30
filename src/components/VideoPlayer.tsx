@@ -3,6 +3,7 @@ import { Download, Maximize, Pause, Play, Volume2, VolumeX, X } from 'lucide-rea
 import type { Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { no2 } from '@/utils/project'
+import videoPoster from '@/assets/placeholders/frame-5.jpg'
 
 const DURATION = 15
 const SPEEDS = [0.5, 1, 1.5, 2]
@@ -69,15 +70,11 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
           </button>
         </div>
 
-        {/* 画面：9:16 居中 */}
-        <div className="flex flex-1 items-center justify-center overflow-hidden bg-black/20 p-4">
+        {/* 画面：9:16 竖屏居中（无真实视频时用占位图，保证不为空） */}
+        <div className="flex items-center justify-center overflow-hidden bg-black/20 p-4">
           <div
-            className="h-full max-h-[70vh] cursor-pointer bg-cover bg-center"
-            style={{
-              aspectRatio: '9 / 16',
-              backgroundImage: url ? `url("${url}")` : undefined,
-              background: url ? undefined : 'linear-gradient(135deg,#2a2a2e,#141416)',
-            }}
+            className="aspect-[9/16] h-[68vh] max-h-[560px] cursor-pointer overflow-hidden rounded-md bg-cover bg-center"
+            style={{ backgroundImage: `url("${url ?? videoPoster}")` }}
             onClick={() => setPlaying((p) => !p)}
           />
         </div>
