@@ -52,27 +52,27 @@ export default function ProjectList() {
       <ProjectsTopBar balance={balance} />
       <div className="flex flex-1">
         {/* 侧边栏 */}
-        <aside className="w-[200px] shrink-0 border-r border-white/5 bg-white/5 py-4">
-          <div className="flex flex-col gap-3 px-4">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-2 text-lg font-medium text-white">
-                <ChevronLeft size={18} className="text-[#9b9b9b]" /> 工作流
+        <aside className="w-[280px] shrink-0 border-r border-white/5 bg-white/5 py-6">
+          <div className="flex flex-col gap-5 px-6">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-2.5 text-[22px] font-medium text-white">
+                <ChevronLeft size={22} className="text-[#9b9b9b]" /> 工作流
               </div>
               {/* 画面比例 / 风格标签（对齐 Figma node 6:1601） */}
-              <div className="flex items-center gap-1">
-                <span className="rounded bg-brand/20 px-2 py-[5px] text-[10px] leading-none text-accent-tag backdrop-blur-[6px]">
+              <div className="flex items-center gap-1.5">
+                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[13px] leading-none text-accent-tag backdrop-blur-[6px]">
                   {cfg?.ratio ?? '9:16 竖屏'}
                 </span>
-                <span className="rounded bg-brand/20 px-2 py-[5px] text-[10px] leading-none text-accent-tag backdrop-blur-[6px]">
+                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[13px] leading-none text-accent-tag backdrop-blur-[6px]">
                   {cfg?.style ?? '写实'}
                 </span>
               </div>
             </div>
-            <div className="rounded-lg bg-white/5 p-3 backdrop-blur-[6px]">
-              <div className="text-[10px] text-white/40">当前模式</div>
-              <div className="mt-1 flex items-center justify-between">
-                <span className="text-xs font-medium text-white">{cfg?.mode ?? '全自动 AI 生成'}</span>
-                <button className="text-[10px] text-accent-tag">切换模式</button>
+            <div className="rounded-xl bg-white/5 p-4 backdrop-blur-[6px]">
+              <div className="text-[13px] text-white/40">当前模式</div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-[15px] font-medium text-white">{cfg?.mode ?? '全自动 AI 生成'}</span>
+                <button className="shrink-0 text-[13px] text-accent-tag">切换模式</button>
               </div>
             </div>
           </div>
