@@ -192,17 +192,22 @@ export function FakeSelect({ value }: { value: string }) {
   )
 }
 
-/* 可交互下拉选择（模型选择等） */
+/* 可交互下拉选择（模型选择等）
+   variant='field'     ：确认弹窗深色面板内的下拉字段（40px · bg-black/20 · border-white/10）
+   variant='field-dark'：直接铺在弹窗底上的整宽深色下拉（44px · bg-black/40 · border-white/10）
+   variant='pill'      ：描边胶囊下拉（36px · rounded-xl · border-white/20 · 透明底） */
 export function ModelSelect({
   value,
   options,
   onChange,
   width = 168,
+  variant = 'default',
 }: {
   value: string
   options: readonly string[]
   onChange: (v: string) => void
-  width?: number
+  width?: number | string
+  variant?: 'default' | 'field' | 'field-dark' | 'pill'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -214,15 +219,21 @@ export function ModelSelect({
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
+  const btnCls: Record<'default' | 'field' | 'field-dark' | 'pill', string> = {
+    default: 'flex w-full items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm transition-colors hover:border-brand/60',
+    field: 'flex h-10 w-full items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white transition-colors hover:border-white/20',
+    'field-dark': 'flex h-11 w-full items-center justify-between rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white transition-colors hover:border-white/20',
+    pill: 'flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/20 bg-transparent px-3 text-sm font-medium text-white transition-colors hover:border-white/40',
+  }
+  const chevronMuted = variant === 'default' ? 'text-faint' : 'text-white/60'
   return (
     <div ref={ref} className="relative" style={{ width }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm transition-colors hover:border-brand/60"
-      >
+      <button type="button" onClick={() => setOpen((o) => !o)} className={btnCls[variant]}>
         <span className="truncate">{value}</span>
-        <ChevronDown size={14} className={`ml-1 shrink-0 text-faint transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          size={variant === 'default' ? 14 : 12}
+          className={`ml-1 shrink-0 transition-transform ${chevronMuted} ${open ? 'rotate-180' : ''}`}
+        />
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
@@ -254,17 +265,24 @@ export function Popover({
   onClose,
   children,
   width = 168,
+  variant = 'default',
 }: {
   anchor: { top: number; left: number }
   onClose: () => void
   children: ReactNode
   width?: number
+  // default：紧凑文字菜单；glass：深色毛玻璃 + 图标行（对齐 Figma node 6:5555）
+  variant?: 'default' | 'glass'
 }) {
   const left = Math.max(8, Math.min(anchor.left, window.innerWidth - width - 12))
+  const panelCls =
+    variant === 'glass'
+      ? 'absolute flex flex-col gap-4 rounded-lg border border-white/10 bg-[#242628] p-[17px] shadow-2xl backdrop-blur-[10px] animate-fadeUp'
+      : 'absolute rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp'
   return (
     <div className="fixed inset-0 z-50" onMouseDown={onClose}>
       <div
-        className="absolute rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp"
+        className={panelCls}
         style={{ top: anchor.top, left, width }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -354,14 +372,17 @@ export function ActionBar({ left, children }: { left?: ReactNode; children: Reac
 /* ---------- 星钻确认弹窗内部小行 ---------- */
 function Row({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted">{label}</span>
-      <span className="text-right">{value}</span>
+    <div className="flex min-h-[32px] items-center justify-between gap-3">
+      <span className="shrink-0 text-sm text-white/60">{label}</span>
+      <span className="text-right text-sm text-white">{value}</span>
     </div>
   )
 }
 
-/* ---------- 全站唯一的星钻确认弹窗 ---------- */
+// 浅青渐变主按钮（与首页 CTA 一致）
+const CONFIRM_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+
+/* ---------- 全站唯一的星钻确认弹窗（对齐设计稿：#1c1e20 深色壳 + 深色明细面板 + 胶囊按钮） ---------- */
 export function GenerateConfirmModal({
   title,
   what,
@@ -375,7 +396,7 @@ export function GenerateConfirmModal({
   disabled,
   onConfirm,
   onClose,
-  width = 460,
+  width = 480,
 }: {
   title: string
   what: ReactNode
@@ -392,28 +413,58 @@ export function GenerateConfirmModal({
   width?: number
 }) {
   return (
-    <Modal
-      title={title}
-      width={width}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" disabled={disabled} onClick={onConfirm}>
+    <Overlay onClose={onClose}>
+      <div
+        className="overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]"
+        style={{ width }}
+      >
+        {/* 头部 */}
+        <div className="flex h-16 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">{title}</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* 主体 */}
+        <div className="px-5 py-6">
+          <div className="text-sm text-white/60">{what}</div>
+          {extra && <div className="mt-4">{extra}</div>}
+          <div className="mt-3 flex flex-col gap-2 rounded-lg bg-black/40 p-3">
+            {count && <Row label="生成数量" value={count} />}
+            <Row label={modelLabel} value={model} />
+            <Row
+              label="预计消耗"
+              value={
+                <span className="inline-flex items-center gap-1 text-white">
+                  <Diamond />
+                  {fmt(cost)} 星钻
+                </span>
+              }
+            />
+            <Row label="当前余额" value={`${fmt(balance)} 星钻`} />
+          </div>
+        </div>
+
+        {/* 底部操作 */}
+        <div className="flex h-16 items-center justify-end gap-2 px-5 pb-5">
+          <button
+            onClick={onClose}
+            className="h-10 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+          >
+            取消
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={disabled}
+            style={CONFIRM_GRADIENT}
+            className="h-10 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+          >
             {confirmText}
-          </Button>
-        </>
-      }
-    >
-      <div className="text-sm leading-relaxed text-white/85">{what}</div>
-      {extra && <div className="mt-4">{extra}</div>}
-      <div className="mt-4 space-y-2 rounded-lg bg-panel2 px-3.5 py-3 text-[13px]">
-        {count && <Row label="生成数量" value={count} />}
-        <Row label={modelLabel} value={model} />
-        <Row label="预计消耗" value={<span className="text-white"><Diamond />{fmt(cost)}</span>} />
-        <Row label="当前余额" value={`${fmt(balance)} 星钻`} />
+          </button>
+        </div>
       </div>
-    </Modal>
+    </Overlay>
   )
 }
 

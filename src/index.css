@@ -33,6 +33,26 @@ body {
   background: transparent;
 }
 
+/* 镜头表格横向滚动条：更细，且仅在悬浮表格时显示（默认透明） */
+.table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.table-scroll:hover {
+  scrollbar-color: #3a3a40 transparent;
+}
+.table-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 6px;
+}
+.table-scroll:hover::-webkit-scrollbar-thumb {
+  background: #3a3a40;
+}
+
 /* 卡片操作揭示：桌面 hover / 键盘聚焦时显示，触控端（无 hover）默认常显 */
 .reveal {
   opacity: 1;
@@ -45,6 +65,44 @@ body {
   .group:hover .reveal,
   .group:focus-within .reveal {
     opacity: 1;
+  }
+}
+
+/* 流程条：当前步骤——细白菱形光环向外扩散（光波 ripple，与菱形节点同形）
+   同一时刻只有一圈：扩到约一半即淡出消失，上一圈刚散、下一圈即接上（无停顿） */
+@keyframes omRipple {
+  0% {
+    transform: rotate(45deg) scale(0.62);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: rotate(45deg) scale(1.72);
+    opacity: 0;
+  }
+}
+.om-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border-radius: 7px;
+  border: 1px solid rgba(244, 253, 254, 0.5);
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.18);
+  pointer-events: none;
+  animation: omRipple 2.8s ease-out infinite;
+}
+/* 连接线扫光滑条 */
+@keyframes omSweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(240%);
   }
 }
 
@@ -82,9 +140,9 @@ body {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(147, 209, 196, 0.14) 42%,
-    rgba(147, 209, 196, 0.3) 50%,
-    rgba(147, 209, 196, 0.14) 58%,
+    rgba(2, 197, 200, 0.14) 42%,
+    rgba(2, 197, 200, 0.3) 50%,
+    rgba(2, 197, 200, 0.14) 58%,
     transparent 100%
   );
   transform: translateX(-100%);

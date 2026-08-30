@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { Project, Segment } from '@/types'
 import { useStore } from '@/store/workflowStore'
@@ -7,7 +7,6 @@ import { no2, fmtDur } from '@/utils/project'
 import {
   ActionBar,
   Button,
-  Diamond,
   GenerateConfirmModal,
   GeneratingState,
   InlineRename,
@@ -18,6 +17,51 @@ import {
   PageHeader,
   Textarea,
 } from '@/components/ui'
+
+// 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
+const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+
+/* ---------- 胶囊按钮（对齐设计稿） ---------- */
+function PillPrimary({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode
+  onClick?: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={CTA_GRADIENT}
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
+
+function PillOutline({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode
+  onClick?: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5 disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function Step2Segments({ project }: { project: Project }) {
   const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
@@ -55,19 +99,16 @@ export default function Step2Segments({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="剧本拆解"
+        desc={`共 ${segs.length} 个剧本段落`}
         right={
           <>
-            <Button variant="ghost" size="sm" onClick={() => setRegenOpen(true)}>
-              重新拆解
-            </Button>
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus size={16} /> 新增剧本段落
-            </Button>
+            <PillOutline onClick={() => setRegenOpen(true)}>重新拆解</PillOutline>
+            <PillPrimary onClick={() => setAddOpen(true)}>
+              <Plus size={14} strokeWidth={2.5} /> 新增剧本段落
+            </PillPrimary>
           </>
         }
       />
-
-      <div className="mb-3 text-[13px] text-muted">共 {segs.length} 个剧本段落</div>
 
       <div className="space-y-3">
         {segs.map((s) => (
@@ -79,7 +120,7 @@ export default function Step2Segments({ project }: { project: Project }) {
           />
         ))}
         {segs.length === 0 && (
-          <div className="rounded-xl border border-line/60 bg-panel py-16 text-center text-[13px] text-faint">
+          <div className="rounded-lg border border-white/10 bg-[#111213] py-16 text-center text-[13px] text-faint">
             暂无剧本段落
           </div>
         )}
@@ -125,8 +166,8 @@ export default function Step2Segments({ project }: { project: Project }) {
       {extractOpen && (
         <GenerateConfirmModal
           title="确认提取角色与场景"
-          what={`AI 将从 ${segs.length} 个剧本段落中识别主要角色和场景。`}
-          model={<ModelSelect value={extractModel} options={MODEL_OPTIONS.text} onChange={setExtractModel} />}
+          what={`AI 将从 ${segs.length} 个剧本段落中识别主要角色和场景`}
+          model={<ModelSelect value={extractModel} options={MODEL_OPTIONS.text} onChange={setExtractModel} variant="field" width={220} />}
           cost={COST.assetExtract}
           balance={project.balance}
           confirmText="确认并开始提取"
@@ -143,7 +184,7 @@ export default function Step2Segments({ project }: { project: Project }) {
         <GenerateConfirmModal
           title="确认重新拆解剧本"
           what={`重新拆解将覆盖现有的 ${segs.length} 个剧本段落，已生成的角色、场景、镜头和视频会被标记为需要重新生成。`}
-          model={<ModelSelect value={regenModel} options={MODEL_OPTIONS.text} onChange={setRegenModel} />}
+          model={<ModelSelect value={regenModel} options={MODEL_OPTIONS.text} onChange={setRegenModel} variant="field" width={220} />}
           cost={COST.segGen}
           balance={project.balance}
           confirmText="确认并重新拆解"
@@ -176,19 +217,17 @@ function BottomBar({
   if (assetStatus === 'generating') {
     return (
       <ActionBar>
-        <Button variant="primary" size="lg" disabled>
-          正在提取角色与场景…
-        </Button>
+        <PillPrimary disabled>正在提取角色与场景…</PillPrimary>
       </ActionBar>
     )
   }
   // 已提取且未变脏：直接往前，不扣费、不显示价格
   if (assetStatus === 'done' && !assetStale) {
     return (
-      <ActionBar>
-        <Button variant="primary" size="lg" disabled={disabled} onClick={onNext}>
+      <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
+        <PillPrimary disabled={disabled} onClick={onNext}>
           下一步：角色与场景
-        </Button>
+        </PillPrimary>
       </ActionBar>
     )
   }
@@ -196,20 +235,20 @@ function BottomBar({
   if (assetStale) {
     return (
       <ActionBar left="剧本段落有改动，重新提取可让角色与场景保持同步">
-        <Button variant="primary" size="lg" disabled={disabled} onClick={onExtract}>
-          重新提取角色与场景 · <Diamond />
-          {COST.assetExtract}
-        </Button>
+        <PillPrimary disabled={disabled} onClick={onExtract}>
+          <span className="text-[15px] leading-none">✦</span>
+          {COST.assetExtract} 重新提取角色与场景
+        </PillPrimary>
       </ActionBar>
     )
   }
   // 未提取：首次提取（带价格）
   return (
     <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
-      <Button variant="primary" size="lg" disabled={disabled} onClick={onExtract}>
-        下一步：提取角色与场景 · <Diamond />
-        {COST.assetExtract}
-      </Button>
+      <PillPrimary disabled={disabled} onClick={onExtract}>
+        <span className="text-[15px] leading-none">✦</span>
+        {COST.assetExtract} 下一步：提取角色与场景
+      </PillPrimary>
     </ActionBar>
   )
 }
@@ -237,13 +276,13 @@ function ParagraphCard({
   }, [seg.text])
 
   return (
-    <div className="rounded-xl border border-line bg-panel px-5 py-4">
-      <div className="flex items-center gap-3">
-        <span className="text-[13px] tabular-nums text-faint">{no2(seg.no)}</span>
+    <div className="rounded-lg border border-white/10 bg-[#111213] p-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium tabular-nums text-white/40">{no2(seg.no)}</span>
         {editing ? (
           <InlineRename
             value={seg.title}
-            className="text-[15px] font-medium"
+            className="text-sm font-medium"
             onCommit={(v) => {
               onRenameTitle(v)
               setEditing(false)
@@ -254,24 +293,24 @@ function ParagraphCard({
             type="button"
             title="点击编辑标题"
             onClick={() => setEditing(true)}
-            className="rounded text-left text-[15px] font-medium leading-snug transition-colors hover:text-brand"
+            className="rounded text-left text-sm font-medium leading-snug text-white transition-opacity hover:opacity-70"
           >
             {seg.title}
           </button>
         )}
-        <span className="text-[13px] tabular-nums text-muted">{fmtDur(seg.dur)}</span>
+        <span className="text-sm tabular-nums text-white/40">{fmtDur(seg.dur)}</span>
         <button
           type="button"
           title="删除段落"
           aria-label="删除段落"
           onClick={onDelete}
-          className="ml-auto rounded-md p-1.5 text-faint opacity-45 transition-colors hover:bg-red-500/15 hover:text-red-400 hover:opacity-100"
+          className="ml-auto rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400"
         >
           <Trash2 size={14} />
         </button>
       </div>
 
-      <div className="relative mt-3">
+      <div className="relative mt-2">
         {/* 收起态：点击正文原地展开只读弹窗 */}
         <button
           type="button"
@@ -281,12 +320,12 @@ function ParagraphCard({
         >
           <p
             ref={bodyRef}
-            className="max-h-[7.5rem] overflow-hidden whitespace-pre-line text-[13.5px] leading-relaxed text-white/85 transition-colors group-hover/body:text-white"
+            className="max-h-[7.5rem] overflow-hidden whitespace-pre-line text-xs leading-relaxed text-white/60 transition-colors group-hover/body:text-white/80"
           >
             {seg.text}
           </p>
           {overflow && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-panel to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#111213] to-transparent" />
           )}
         </button>
 
@@ -294,14 +333,14 @@ function ParagraphCard({
         {open && (
           <>
             <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-            <div className="absolute -inset-x-1 -top-1 z-30 rounded-xl border border-brand/45 bg-panel2/95 px-4 py-3 shadow-xl shadow-black/50 ring-1 ring-brand/15 backdrop-blur">
-              <p className="whitespace-pre-line text-[13.5px] leading-relaxed text-white/90">{seg.text}</p>
-              <div className="mt-3 flex items-center justify-between border-t border-line/50 pt-2">
-                <span className="text-[12px] text-faint">只读</span>
+            <div className="absolute -inset-x-1 -top-1 z-30 rounded-lg border border-white/15 bg-[#16181a]/95 px-4 py-3 shadow-xl shadow-black/50 backdrop-blur">
+              <p className="whitespace-pre-line text-[13px] leading-relaxed text-white/90">{seg.text}</p>
+              <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2">
+                <span className="text-[12px] text-white/40">只读</span>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="text-[12px] text-muted transition-colors hover:text-white"
+                  className="text-[12px] text-white/60 transition-colors hover:text-white"
                 >
                   收起
                 </button>

@@ -3,7 +3,22 @@ import { Upload } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import { ActionBar, Button, Diamond, GenerateConfirmModal, ModelSelect, PageHeader, Spinner } from '@/components/ui'
+import { ActionBar, GenerateConfirmModal, ModelSelect, PageHeader, Spinner } from '@/components/ui'
+
+// 浅青渐变主按钮（对齐 Figma node 6:2239，与其它步骤 CTA 一致）
+const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={CTA_GRADIENT}
+      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function Step1Script({ project }: { project: Project }) {
   const setScript = useStore((s) => s.setScript)
@@ -101,23 +116,23 @@ export default function Step1Script({ project }: { project: Project }) {
       </div>
 
       <ActionBar left={chars > 0 ? '拆解后可在下一步查看和编辑剧本段落' : undefined}>
-        <Button variant="primary" size="lg" disabled={chars === 0} onClick={() => setConfirm(true)}>
+        <PillCTA disabled={chars === 0} onClick={() => setConfirm(true)}>
           {chars > 0 ? (
             <>
-              拆解剧本 · <Diamond />
-              {COST.segGen}
+              <span className="text-[12px] leading-none">✦</span>
+              {COST.segGen} 拆解剧本
             </>
           ) : (
             '请先添加剧本内容'
           )}
-        </Button>
+        </PillCTA>
       </ActionBar>
 
       {confirm && (
         <GenerateConfirmModal
           title="确认拆解剧本"
           what="AI 将根据当前内容生成剧本段落。"
-          model={<ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} />}
+          model={<ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} variant="field" width={220} />}
           cost={COST.segGen}
           balance={project.balance}
           confirmText="确认并开始拆解"

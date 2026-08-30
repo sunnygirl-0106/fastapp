@@ -10,10 +10,17 @@ export default {
         panel: '#141416', // 卡片/面板
         panel2: '#1c1c1f', // 次级面板/输入
         line: '#2a2a2e', // 分隔线
-        brand: '#7fd0b8', // 品牌青绿（再绿一点）
-        'brand-dim': '#5cbba0',
+        brand: '#02c5c8', // 主色：设计稿青色（选中/星钻/描边/主按钮），与 accent-coin 统一
+        'brand-dim': '#02a8ab', // 主色 hover 深一档
+        'brand-light': '#87fdff', // 副色：浅青（次级强调 / 链接 / 标签）
         muted: '#8a8a90',
         faint: '#5f5f66',
+        // 首页（创作中心）设计稿配色
+        canvas: '#050505', // 首页页面背景
+        card: '#181a1c', // 项目卡片背景
+        accent: '#00d8dc', // 主青色（已完成 / logo）
+        'accent-coin': '#02c5c8', // 星钻数值青色（= brand）
+        'accent-tag': '#87fdff', // 标签文字青色（= brand-light）
       },
       fontFamily: {
         sans: ['"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],

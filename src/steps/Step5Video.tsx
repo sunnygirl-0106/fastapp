@@ -1,13 +1,43 @@
 import { useState } from 'react'
-import { MoreHorizontal, Play } from 'lucide-react'
+import { Download, Monitor, MoreVertical, Play } from 'lucide-react'
 import type { Project, Shot } from '@/types'
 import { SHOT_GROUPS, SHOT_FIELDS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { no2 } from '@/utils/project'
-import { ActionBar, Button, MenuItem, Modal, PageHeader, Popover, ReadonlyField, Spinner } from '@/components/ui'
+import { ActionBar, Modal, PageHeader, Popover, ReadonlyField } from '@/components/ui'
 import VideoPlayer from '@/components/VideoPlayer'
+import generatingPlaceholder from '@/assets/video-generating-placeholder.png'
 
 const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? String(k)
+
+// 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
+const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+
+// 描边胶囊：重新生成镜头（对齐 Figma node 6:5342）
+function PillOutline({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+    >
+      {children}
+    </button>
+  )
+}
+
+// 浅青渐变胶囊：批量下载（对齐 Figma node 6:5334）
+function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={CTA_GRADIENT}
+      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function Step5Video({ project }: { project: Project }) {
   const showToast = useStore((s) => s.showToast)
@@ -37,9 +67,17 @@ export default function Step5Video({ project }: { project: Project }) {
   return (
     <div>
       {allDone ? (
-        <PageHeader title="视频成片" desc={`${vids.length} 段视频已全部生成。`} />
+        <PageHeader
+          title="视频成片"
+          desc={`${vids.length} 段视频已全部生成。`}
+          right={<PillOutline onClick={() => goStep(4)}>重新生成镜头</PillOutline>}
+        />
       ) : (
-        <PageHeader title="正在生成视频" desc="正在逐段生成视频，请保持页面打开。" />
+        <PageHeader
+          title="正在生成视频"
+          desc="正在逐段生成视频，请保持页面打开。"
+          right={<PillOutline onClick={() => goStep(4)}>重新生成镜头</PillOutline>}
+        />
       )}
 
       {!allDone && <div className="mb-4 text-[13px] text-muted">已完成 {doneCount}/{total}</div>}
@@ -47,43 +85,47 @@ export default function Step5Video({ project }: { project: Project }) {
       <div className="flex flex-wrap gap-4">
         {vids.map((s) => {
           const done = s.video.state === 'done'
-          const url = s.video.versions[0]?.url
           return (
-            <div key={s.id} className="w-[168px] overflow-hidden rounded-lg border border-line bg-panel">
+            <div
+              key={s.id}
+              className="w-[226px] overflow-hidden rounded-lg border border-white/5 bg-card"
+            >
+              {/* 视频预览：完成显示帧 + 播放浮层；生成中显示渐变占位 */}
               <div
                 onClick={() => done && setPlay(s)}
-                className={`group relative flex aspect-[9/16] w-full items-center justify-center bg-cover bg-center ${
-                  done ? 'cursor-pointer' : 'cursor-default skeleton'
+                className={`group relative flex aspect-[226/221] w-full items-center justify-center overflow-hidden bg-cover bg-center ${
+                  done ? 'cursor-pointer' : 'cursor-default'
                 }`}
-                style={{ backgroundImage: done && url ? `url("${url}")` : undefined }}
+                style={{ backgroundImage: `url("${generatingPlaceholder}")` }}
               >
-                {done ? (
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 text-white transition group-hover:bg-black/70">
-                    <Play size={20} className="ml-0.5" fill="currentColor" />
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-2 text-xs text-muted">
-                    <Spinner size={13} /> 生成中…
+                {done && (
+                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition group-hover:bg-black/60">
+                    <Play size={28} className="ml-0.5" fill="currentColor" />
                   </span>
                 )}
               </div>
-              <div className="flex items-center justify-between px-3 py-2">
-                <div>
-                  <div className="text-[13px] text-white">镜头 {no2(s.no)}</div>
-                  <div className={`text-xs ${done ? 'text-faint' : 'text-amber-400'}`}>
-                    {done ? '15 秒' : '15 秒 · 生成中'}
-                  </div>
+
+              {/* 信息条：镜头名 + 更多；状态 + 时长 */}
+              <div className="flex flex-col gap-2 px-5 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-[16px] font-medium text-white">镜头 {no2(s.no)}</div>
+                  <button
+                    className="text-white/60 transition-colors hover:text-white"
+                    title="更多"
+                    onClick={(e) => {
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      setMenu({ s, top: r.bottom + 4, left: r.left - 140 })
+                    }}
+                  >
+                    <MoreVertical size={18} />
+                  </button>
                 </div>
-                <button
-                  className="text-muted hover:text-white"
-                  title="更多"
-                  onClick={(e) => {
-                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    setMenu({ s, top: r.bottom + 4, left: r.left - 140 })
-                  }}
-                >
-                  <MoreHorizontal size={16} />
-                </button>
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className={`font-medium ${done ? 'text-[#00d8dc]' : 'text-[#dcb400]'}`}>
+                    {done ? '已完成' : '生成中'}
+                  </span>
+                  <span className="text-white/40">15 秒</span>
+                </div>
               </div>
             </div>
           )
@@ -91,15 +133,27 @@ export default function Step5Video({ project }: { project: Project }) {
       </div>
 
       <ActionBar left={allDone ? `${vids.length} 段视频已全部生成` : `正在生成视频 · 已完成 ${doneCount}/${total}`}>
-        <Button variant="primary" size="lg" disabled={!allDone} onClick={() => showToast('已开始批量下载（示意）')}>
+        <PillCTA disabled={!allDone} onClick={() => showToast('已开始批量下载（示意）')}>
           批量下载
-        </Button>
+        </PillCTA>
       </ActionBar>
 
       {menu && (
-        <Popover anchor={menu} width={140} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { showToast('已开始下载（示意）'); setMenu(null) }}>下载视频</MenuItem>
-          <MenuItem onClick={() => { setInfo(menu.s); setMenu(null) }}>查看镜头信息</MenuItem>
+        <Popover anchor={menu} width={150} variant="glass" onClose={() => setMenu(null)}>
+          <button
+            className="flex items-center gap-2 text-[14px] text-white/90 transition-colors hover:text-white"
+            onClick={() => { showToast('已开始下载（示意）'); setMenu(null) }}
+          >
+            <Download size={16} className="shrink-0" />
+            下载视频
+          </button>
+          <button
+            className="flex items-center gap-2 text-[14px] text-white/90 transition-colors hover:text-white"
+            onClick={() => { setInfo(menu.s); setMenu(null) }}
+          >
+            <Monitor size={16} className="shrink-0" />
+            查看镜头信息
+          </button>
         </Popover>
       )}
 

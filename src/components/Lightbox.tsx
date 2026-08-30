@@ -39,7 +39,7 @@ export default function Lightbox({ title, url, onClose }: { title: string; url?:
           </div>
         </div>
         <div
-          className="h-[560px] w-[420px] rounded-lg bg-cover bg-center"
+          className="aspect-[3/4] h-[82vh] max-h-[880px] max-w-[90vw] rounded-lg bg-cover bg-center"
           style={{
             backgroundImage: url ? `url("${url}")` : undefined,
             background: url ? undefined : 'linear-gradient(135deg,#2a2a2e,#141416)',

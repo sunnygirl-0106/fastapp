@@ -1,5 +1,9 @@
-import { Bell, ChevronLeft } from 'lucide-react'
+import { Bell, ChevronLeft, Settings } from 'lucide-react'
 import { Diamond, fmt } from './ui'
+import logoMark from '@/assets/logo-mark.svg'
+import logoWordmark from '@/assets/logo-wordmark.svg'
+import coinIcon from '@/assets/icon-coin.svg'
+import avatar from '@/assets/avatar.jpg'
 
 function RightCluster({ balance }: { balance: number }) {
   return (
@@ -17,14 +21,24 @@ function RightCluster({ balance }: { balance: number }) {
   )
 }
 
+/* 首页顶栏：对齐设计稿（logo 锁定 + 星钻 / 创作手册 / 提醒 / 设置 / 头像） */
 export function ProjectsTopBar({ balance }: { balance: number }) {
   return (
-    <header className="flex items-center justify-between px-6 py-4">
+    <header className="flex h-12 items-center justify-between border-b border-white/10 bg-canvas px-4 backdrop-blur-[10px]">
       <div className="flex items-center gap-2">
-        <span className="text-brand">▚</span>
-        <span className="italic text-[17px] font-semibold tracking-wide">PhanthyMovie</span>
+        <img src={logoMark} alt="" className="h-5 w-5" />
+        <img src={logoWordmark} alt="PhanthyMovie" className="h-[14px] w-auto" />
       </div>
-      <RightCluster balance={balance} />
+      <div className="flex items-center gap-4">
+        <span className="inline-flex items-center gap-2">
+          <img src={coinIcon} alt="" className="h-3.5 w-3.5" />
+          <span className="tabular-nums text-[14px] text-accent-coin">{fmt(balance)}</span>
+        </span>
+        <span className="text-[14px] text-[#a3a3a3]">创作手册</span>
+        <Bell size={20} className="text-white opacity-40" />
+        <Settings size={20} className="text-white/80" />
+        <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+      </div>
     </header>
   )
 }

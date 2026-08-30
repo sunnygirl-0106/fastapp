@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ListFilter, MoreHorizontal, SlidersHorizontal, X } from 'lucide-react'
+import { Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
@@ -9,19 +9,68 @@ import { useAutoSave } from '@/hooks/useAutoSave'
 import {
   ActionBar,
   Button,
-  Diamond,
-  Drawer,
   GeneratingState,
   MenuItem,
   PageHeader,
   Popover,
   SaveBadge,
   StaleNotice,
-  Textarea,
   fmt,
 } from '@/components/ui'
 import GenShotModal from './GenShotModal'
 import VideoConfirmModal from './VideoConfirmModal'
+
+// 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
+const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+
+function PillOutline({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+    >
+      {children}
+    </button>
+  )
+}
+
+function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={CTA_GRADIENT}
+      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
+
+// 表头「全选」复选框（支持半选 indeterminate）
+function HeadCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean
+  indeterminate: boolean
+  onChange: () => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate
+  }, [indeterminate])
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className="h-[18px] w-[18px] rounded accent-brand"
+    />
+  )
+}
 
 function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string } {
   if (v.state === 'generating') return { text: '正在生成视频', cls: 'text-amber-400', dot: 'bg-amber-400' }
@@ -31,6 +80,9 @@ function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string 
 }
 
 const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? String(k)
+
+// 默认可见列：画面与节奏 + 人物与空间（共 7 列）；「更多设定」默认隐藏，可在「字段」里开启
+const DEFAULT_VISIBLE_FIELDS = SHOT_GROUPS.slice(0, 2).flatMap((g) => g.fields)
 
 // 时间线展示：拆成固定三段（0–5 / 5–10 / 10–15 秒），不足补空行以稳定行高
 function parseTimeline(raw: string): string[] {
@@ -66,13 +118,13 @@ const COL_W: Partial<Record<keyof Shot, { min: number; grow: number }>> = {
   background: { min: 140, grow: 1.2 },
 }
 
-// 拼自适应网格列：选择 44 / 镜头 150 / …可见字段列（minmax 伸缩）… / 操作 56
+// 拼自适应网格列：选择 44 / 镜头 150 / …可见字段列（minmax 伸缩）… / 操作 76
 function buildGridTemplate(cols: { key: keyof Shot }[]): string {
   const fields = cols.map((c) => {
     const w = COL_W[c.key] ?? { min: 160, grow: 1.2 }
     return `minmax(${w.min}px, ${w.grow}fr)`
   })
-  return ['44px', '150px', ...fields, '56px'].join(' ')
+  return ['44px', '150px', ...fields, '76px'].join(' ')
 }
 
 export default function Step4Shots({ project }: { project: Project }) {
@@ -86,8 +138,8 @@ export default function Step4Shots({ project }: { project: Project }) {
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
   const [videoConfirm, setVideoConfirm] = useState<string[] | null>(null)
 
-  // 列可见性：默认与现状一致（画面 + 时间线）；镜头/选择/操作为固定列，不参与开关
-  const [visibleFields, setVisibleFields] = useState<(keyof Shot)[]>(['shot', 'timeline'])
+  // 列可见性：默认显示前两组共 7 列；镜头/选择/操作为固定列，不参与开关
+  const [visibleFields, setVisibleFields] = useState<(keyof Shot)[]>(DEFAULT_VISIBLE_FIELDS)
   const [fieldsAnchor, setFieldsAnchor] = useState<{ top: number; left: number } | null>(null)
   // 筛选条件（多条件「并且」关系）
   const [filters, setFilters] = useState<{ field: keyof Shot; value: string }[]>([])
@@ -112,6 +164,19 @@ export default function Step4Shots({ project }: { project: Project }) {
   const cols = SHOT_FIELDS.filter((f) => visibleFields.includes(f.key))
   const gridTemplate = buildGridTemplate(cols)
   const shownShots = shots.filter((s) => filters.every((f) => fuzzy(f.value, String(s[f.field] ?? ''))))
+
+  // 「操作」列仅在表格横向溢出（内容撑到最右侧）时才吸附悬浮；列少时作为普通列
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [pinned, setPinned] = useState(false)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const measure = () => setPinned(el.scrollWidth > el.clientWidth + 1)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [gridTemplate, shownShots.length])
 
   const toggleField = (k: keyof Shot) =>
     setVisibleFields((v) => (v.includes(k) ? v.filter((x) => x !== k) : [...v, k]))
@@ -155,14 +220,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       <PageHeader
         title="镜头设计"
         desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.length * 15} 秒。`}
-        right={
-          <button
-            onClick={() => setGenOpen(true)}
-            className="text-[13px] text-muted transition-colors hover:text-white"
-          >
-            重新生成镜头
-          </button>
-        }
+        right={<PillOutline onClick={() => setGenOpen(true)}>重新生成镜头</PillOutline>}
       />
 
       {project.shotStale && (
@@ -175,33 +233,57 @@ export default function Step4Shots({ project }: { project: Project }) {
 
       {/* 工具条：字段 / 筛选 + 已加条件 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* 字段：选中/展开时整枚标签高亮（青色描边+底+图标徽章） */}
         <button
           onClick={(e) => {
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
             setFieldsAnchor({ top: r.bottom + 6, left: r.left })
           }}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[13px] text-white/90 transition-colors hover:border-brand/60"
+          className={`inline-flex items-center gap-2.5 rounded-[11px] border py-2 pl-2 pr-3.5 transition-colors ${
+            fieldsAnchor
+              ? 'border-brand/40 bg-brand/[0.08]'
+              : 'border-line bg-white/[0.03] hover:border-white/20'
+          }`}
         >
-          <SlidersHorizontal size={14} className="text-faint" />
-          字段
+          <span
+            className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg transition-colors ${
+              fieldsAnchor ? 'bg-brand/20' : 'bg-white/5'
+            }`}
+          >
+            <Columns2 size={14} className={fieldsAnchor ? 'text-brand' : 'text-white/70'} />
+          </span>
+          <span className={`text-[13px] font-medium ${fieldsAnchor ? 'text-brand' : 'text-white/70'}`}>字段</span>
           {visibleFields.length < SHOT_FIELDS.length && (
-            <span className="tabular-nums text-[12px] text-brand">
+            <span
+              className={`text-[11px] font-semibold tabular-nums ${fieldsAnchor ? 'text-brand' : 'text-white/70'} opacity-70`}
+            >
               {visibleFields.length}/{SHOT_FIELDS.length}
             </span>
           )}
         </button>
 
+        {/* 筛选：选中/展开时整枚标签高亮，含结果数徽章 */}
         <button
           onClick={(e) => {
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
             setFilterAnchor({ top: r.bottom + 6, left: r.left })
           }}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[13px] text-white/90 transition-colors hover:border-brand/60"
+          className={`inline-flex items-center gap-2.5 rounded-[11px] border py-2 pl-2 pr-3.5 transition-colors ${
+            filterAnchor
+              ? 'border-brand/40 bg-brand/[0.08]'
+              : 'border-line bg-white/[0.03] hover:border-white/20'
+          }`}
         >
-          <ListFilter size={14} className="text-faint" />
-          筛选
+          <span
+            className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg transition-colors ${
+              filterAnchor ? 'bg-brand/20' : 'bg-white/5'
+            }`}
+          >
+            <Filter size={14} className={filterAnchor ? 'text-brand' : 'text-white/70'} />
+          </span>
+          <span className={`text-[13px] font-medium ${filterAnchor ? 'text-brand' : 'text-white/70'}`}>筛选</span>
           {filters.length > 0 && (
-            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-medium tabular-nums text-black">
+            <span className="rounded-full bg-brand px-[7px] py-[3px] text-[11px] font-semibold tabular-nums text-black">
               {filters.length}
             </span>
           )}
@@ -232,27 +314,47 @@ export default function Step4Shots({ project }: { project: Project }) {
             >
               清除筛选
             </button>
-            <span className="text-[12px] text-faint">命中 {shownShots.length} 条</span>
+            <span className="text-[12px] text-faint">筛选结果 {shownShots.length} 条</span>
           </>
         )}
       </div>
 
-      {/* 表格：列少时自适应铺满，列多时横向滚动 */}
-      <div className="overflow-x-auto">
+      {/* 表格：统一深色表格（对齐设计稿）——列少自适应铺满、列多横向滚动 */}
+      <div ref={scrollRef} className="table-scroll overflow-x-auto rounded-lg border border-white/10 bg-card">
         <div className="w-full min-w-[720px]">
-          {/* 表头 */}
+          {/* 表头（#101010 深色栏） */}
           <div
-            className="grid items-center border-b border-line/60 px-1 pb-2 text-[12px] text-faint"
+            className="grid items-stretch bg-[#101010] text-[13px] text-white/90"
             style={{ gridTemplateColumns: gridTemplate }}
           >
-            <div className="text-center">选择</div>
-            <div className="px-3">镜头</div>
+            <div className="flex h-12 items-center justify-center">
+              <HeadCheckbox
+                checked={shownShots.length > 0 && shownShots.every((s) => sel.includes(s.id))}
+                indeterminate={
+                  shownShots.some((s) => sel.includes(s.id)) && !shownShots.every((s) => sel.includes(s.id))
+                }
+                onChange={() => {
+                  const ids = shownShots.map((s) => s.id)
+                  const allOn = ids.length > 0 && ids.every((id) => sel.includes(id))
+                  setSel((prev) =>
+                    allOn ? prev.filter((id) => !ids.includes(id)) : Array.from(new Set([...prev, ...ids])),
+                  )
+                }}
+              />
+            </div>
+            <div className="flex h-12 items-center border-r border-white/[0.06] px-3">镜头</div>
             {cols.map((c) => (
-              <div key={c.key} className="px-3">
+              <div key={c.key} className="flex h-12 items-center border-r border-white/[0.06] px-3">
                 {c.label}
               </div>
             ))}
-            <div className="text-center">操作</div>
+            <div
+              className={`flex h-12 items-center justify-center bg-[#101010] px-3 ${
+                pinned ? 'sticky right-0 z-20 border-l border-white/10 shadow-[-2px_0_6px_rgba(0,0,0,0.5)]' : ''
+              }`}
+            >
+              操作
+            </div>
           </div>
 
           {shownShots.length === 0 ? (
@@ -266,13 +368,14 @@ export default function Step4Shots({ project }: { project: Project }) {
               </button>
             </div>
           ) : (
-            <div className="mt-2 space-y-2">
+            <div>
               {shownShots.map((s) => (
                 <ShotRow
                   key={s.id}
                   shot={s}
                   cols={cols}
                   gridTemplate={gridTemplate}
+                  pinned={pinned}
                   selected={sel.includes(s.id)}
                   active={detailId === s.id}
                   flash={flashId === s.id}
@@ -289,38 +392,17 @@ export default function Step4Shots({ project }: { project: Project }) {
         </div>
       </div>
 
-      <ActionBar
-        left={
-          <label className="flex cursor-pointer select-none items-center gap-2 text-[13px] text-muted transition-colors hover:text-white">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-brand"
-              checked={shownShots.length > 0 && shownShots.every((s) => sel.includes(s.id))}
-              onChange={(e) => {
-                const ids = shownShots.map((s) => s.id)
-                setSel((prev) =>
-                  e.target.checked
-                    ? Array.from(new Set([...prev, ...ids]))
-                    : prev.filter((id) => !ids.includes(id)),
-                )
-              }}
-            />
-            全选
-            <span className="text-faint">·</span>
-            已选择 {sel.length}/{shots.length} 个镜头
-          </label>
-        }
-      >
-        <Button variant="primary" size="lg" disabled={!sel.length} onClick={() => setVideoConfirm(sel)}>
+      <ActionBar left={`已选择 ${sel.length}/${shots.length} 个镜头，可取消个别镜头`}>
+        <PillCTA disabled={!sel.length} onClick={() => setVideoConfirm(sel)}>
           {sel.length ? (
             <>
-              生成 {sel.length} 段视频 · <Diamond />
-              {fmt(sel.length * COST.videoEach)}
+              <span className="text-[12px] leading-none">✦</span>
+              {fmt(sel.length * COST.videoEach)} {sel.length === shots.length ? '生成全部' : '生成'} {sel.length} 段视频
             </>
           ) : (
             '请至少选择一个镜头'
           )}
-        </Button>
+        </PillCTA>
       </ActionBar>
 
       {/* 右侧详情面板：key 切换镜头时重挂载，卸载前自动 flush */}
@@ -361,7 +443,7 @@ export default function Step4Shots({ project }: { project: Project }) {
               <button
                 onClick={() =>
                   setVisibleFields((v) =>
-                    v.length === SHOT_FIELDS.length ? ['shot', 'timeline'] : SHOT_FIELDS.map((f) => f.key),
+                    v.length === SHOT_FIELDS.length ? DEFAULT_VISIBLE_FIELDS : SHOT_FIELDS.map((f) => f.key),
                   )
                 }
                 className="text-[13px] text-muted transition-colors hover:text-white"
@@ -382,7 +464,7 @@ export default function Step4Shots({ project }: { project: Project }) {
                           onClick={() => toggleField(k)}
                           className={`rounded-xl border px-4 py-2 text-[14px] transition-colors ${
                             on
-                              ? 'border-brand/45 bg-brand/[0.08] text-[#c9f5ee]'
+                              ? 'border-brand/40 bg-brand/[0.08] text-brand-light'
                               : 'border-white/10 bg-transparent text-white/30 hover:border-line hover:text-muted'
                           }`}
                         >
@@ -443,6 +525,7 @@ function ShotRow({
   shot,
   cols,
   gridTemplate,
+  pinned,
   selected,
   active,
   flash,
@@ -453,6 +536,7 @@ function ShotRow({
   shot: Shot
   cols: { key: keyof Shot; label: string }[]
   gridTemplate: string
+  pinned: boolean
   selected: boolean
   active: boolean
   flash?: boolean
@@ -465,8 +549,8 @@ function ShotRow({
   return (
     <div
       id={`shot-${shot.id}`}
-      className={`grid min-h-[120px] items-stretch rounded-xl border bg-panel transition-colors ${
-        active ? 'border-transparent ring-1 ring-brand/50' : 'border-line hover:border-line'
+      className={`grid min-h-[120px] items-stretch border-b border-white/10 transition-colors last:border-b-0 ${
+        active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.02]'
       } ${flash ? 'row-flash' : ''}`}
       style={{ gridTemplateColumns: gridTemplate }}
     >
@@ -476,7 +560,7 @@ function ShotRow({
       </div>
 
       {/* 镜头信息 */}
-      <div className="flex flex-col justify-center gap-1 px-3 py-3">
+      <div className="flex flex-col justify-center gap-1 border-r border-white/[0.06] px-3 py-3">
         <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
         <span className="text-[12px] text-faint">{fmtDur('15s')}</span>
         <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
@@ -508,10 +592,15 @@ function ShotRow({
         />
       ))}
 
-      {/* 操作 */}
-      <div className="flex items-start justify-center pt-3" onClick={(e) => e.stopPropagation()}>
+      {/* 操作（横向 ⋯）：仅在表格横向溢出时吸附悬浮到最右侧，否则作为普通列居中 */}
+      <div
+        className={`flex items-center justify-center px-3 py-3 ${
+          pinned ? 'sticky right-0 z-10 border-l border-white/10 shadow-[-2px_0_6px_rgba(0,0,0,0.5)]' : ''
+        } ${active ? 'bg-[#202325]' : 'bg-card'}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
-          className="rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-panel2 hover:text-white"
+          className="inline-flex items-center justify-center rounded-full border border-white/10 px-3 py-1.5 text-white/70 transition-colors hover:border-white/25 hover:text-white"
           onClick={onMenu}
           title="更多"
         >
@@ -542,12 +631,12 @@ function FilterComposer({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex shrink-0 items-center gap-1 whitespace-nowrap px-3.5 py-2.5 text-[14px] text-white/90"
+        className="m-1.5 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-[13px] font-medium text-brand transition-colors hover:bg-brand/[0.16]"
       >
         {labelOf(field)}
-        <ChevronDown size={14} className={`text-faint transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      <span className="h-5 w-px shrink-0 bg-line" />
+      <span className="shrink-0 px-2 text-[12px] text-faint">包含</span>
       <input
         value={value}
         onChange={(e) => onValue(e.target.value)}
@@ -555,7 +644,7 @@ function FilterComposer({
           if (e.key === 'Enter') onAdd()
         }}
         placeholder="输入关键词，回车添加"
-        className="w-full bg-transparent px-3.5 py-2.5 text-[14px] outline-none placeholder:text-faint"
+        className="mr-1.5 w-full rounded-lg bg-transparent px-2.5 py-2.5 text-[14px] outline-none placeholder:text-faint"
       />
       {open && (
         <div className="absolute left-0 top-full z-10 mt-1 max-h-56 w-48 overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
@@ -578,6 +667,24 @@ function FilterComposer({
         </div>
       )}
     </div>
+  )
+}
+
+/* 关键词高亮：把命中的关键词包成 <mark>（青底浅青字），支持多关键词 */
+function highlightText(text: string, terms: string[]): React.ReactNode {
+  const ts = terms.map((t) => t.trim()).filter(Boolean)
+  if (!ts.length) return text
+  const esc = ts.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`(${esc.join('|')})`, 'gi')
+  const parts = text.split(re)
+  return parts.map((p, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="rounded-[3px] bg-brand/20 px-0.5 text-brand-light">
+        {p}
+      </mark>
+    ) : (
+      p
+    ),
   )
 }
 
@@ -611,10 +718,13 @@ function FilterPreview({
       (!draft || fuzzy(draft, String(s[draftField] ?? ''))),
   )
 
+  // 需要高亮的关键词：当前草稿 + 已加条件里落在当前字段的值
+  const terms = [draft, ...filters.filter((f) => f.field === draftField).map((f) => f.value)]
+
   return (
     <div className="mt-3.5 border-t border-line pt-3">
       <div className="mb-2 flex items-center justify-between text-[12px] text-faint">
-        <span>命中结果</span>
+        <span className="tracking-wider">匹配镜头</span>
         <span className="tabular-nums">
           {hits.length}/{shots.length} 个镜头
         </span>
@@ -622,7 +732,7 @@ function FilterPreview({
       {hits.length === 0 ? (
         <div className="py-6 text-center text-[13px] text-faint">没有符合条件的镜头</div>
       ) : (
-        <div className="-mx-1 max-h-[240px] space-y-0.5 overflow-y-auto px-1">
+        <div className="-mx-1 flex max-h-[260px] flex-col gap-2 overflow-y-auto px-1 pb-1">
           {hits.map((s) => {
             const snippet = String(s[draftField] ?? '').replace(/\s+/g, ' ').trim()
             return (
@@ -631,11 +741,17 @@ function FilterPreview({
                 type="button"
                 title="定位到该镜头"
                 onClick={() => onPick(s.id)}
-                className="flex w-full items-baseline gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-line/50"
+                className="group w-full rounded-[10px] border border-white/[0.06] bg-white/[0.03] px-3.5 py-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/[0.06]"
               >
-                <span className="shrink-0 text-[13px] font-medium tabular-nums text-brand">#{s.no}</span>
-                <span className="text-faint">·</span>
-                <span className="line-clamp-1 text-[13px] text-white/80">{snippet || '（该字段为空）'}</span>
+                <div className="flex items-center gap-2.5">
+                  <span className="rounded bg-brand px-1.5 py-1 text-[10.5px] font-semibold leading-none tabular-nums text-black">
+                    {no2(s.no)}
+                  </span>
+                  <span className="text-[11.5px] text-white/40">{fmtDur('15s')}</span>
+                </div>
+                <div className="mt-2 line-clamp-2 text-[12.5px] leading-relaxed text-white/[0.62]">
+                  {snippet ? highlightText(snippet, terms) : '（该字段为空）'}
+                </div>
               </button>
             )
           })}
@@ -690,7 +806,7 @@ function InlineCellEditor({
   }
 
   return (
-    <div className="px-3 py-3 text-[13px] leading-relaxed text-white/90">
+    <div className="h-full border-r border-white/[0.06] px-3 py-3 text-[13px] leading-relaxed text-white/90">
       <div onClick={start} className="cursor-text">
         {readView}
       </div>
@@ -765,49 +881,73 @@ function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }
     schedule(v)
   }
 
-  const renderFields = (fields: (keyof Shot)[], dim: boolean) => (
-    <div className="space-y-2.5">
-      {fields.map((k) => (
-        <div key={k} className="grid grid-cols-[76px_1fr] items-start gap-3">
-          <div className="pt-2 text-[13px] text-muted">{labelOf(k)}</div>
-          <Textarea
-            dim={dim}
-            rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
-            value={draft[k]}
-            onChange={(e) => setField(k, e.target.value)}
-          />
-        </div>
-      ))}
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // 单个字段：标签在上、可编辑值框在下（对齐 Figma node 6:6577）
+  const renderField = (k: keyof Shot) => (
+    <div key={k} className="flex flex-col gap-2">
+      <div className="text-[14px] leading-[18px] text-white/60">{labelOf(k)}</div>
+      <textarea
+        rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
+        value={draft[k]}
+        onChange={(e) => setField(k, e.target.value)}
+        className="w-full resize-none rounded-md border border-white/10 bg-card px-3 py-3.5 text-[14px] leading-relaxed text-white/90 outline-none transition-colors placeholder:text-white/30 focus:border-brand/50"
+      />
     </div>
   )
 
   return (
-    <Drawer title={`镜头 ${no2(shot.no)}`} status={status} onClose={onClose} width={600}>
-      {SHOT_GROUPS.map((g, gi) => {
-        const collapsible = gi === SHOT_GROUPS.length - 1 // 更多设定：默认收起
-        if (collapsible) {
-          return (
-            <div key={g.title} className="mt-2">
-              <button
-                type="button"
-                onClick={() => setMoreOpen((o) => !o)}
-                className="flex w-full items-center gap-1.5 py-2 text-[13px] font-medium text-faint transition-colors hover:text-muted"
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/60 animate-fadeUp" onMouseDown={onClose}>
+      <div
+        className="flex h-full w-[560px] max-w-[92vw] flex-col bg-[#202224] shadow-2xl animate-slideInRight"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* 头部：64px，镜头标题 18px */}
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-6">
+          <div className="text-[18px] font-medium leading-8 text-white/90">镜头 {no2(shot.no)}</div>
+          <SaveBadge status={status} />
+          <button
+            className="ml-auto text-white/50 transition-colors hover:text-white"
+            onClick={onClose}
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* 分组内容：每组之间用顶分隔线隔开 */}
+        <div className="flex-1 overflow-y-auto">
+          {SHOT_GROUPS.map((g, gi) => {
+            const collapsible = gi === SHOT_GROUPS.length - 1 // 更多设定：默认收起
+            const open = !collapsible || moreOpen
+            return (
+              <div
+                key={g.title}
+                className={`flex flex-col gap-4 p-6 ${gi > 0 ? 'border-t border-white/10' : ''}`}
               >
-                <ChevronDown size={14} className={`transition-transform ${moreOpen ? '' : '-rotate-90'}`} />
-                {g.title}
-              </button>
-              {moreOpen && <div className="pt-1">{renderFields(g.fields, true)}</div>}
-            </div>
-          )
-        }
-        return (
-          <div key={g.title} className="mb-5">
-            <div className="mb-2 text-[13px] font-medium text-muted">{g.title}</div>
-            {renderFields(g.fields, false)}
-          </div>
-        )
-      })}
-    </Drawer>
+                {collapsible ? (
+                  <button
+                    type="button"
+                    onClick={() => setMoreOpen((o) => !o)}
+                    className="flex items-center gap-1.5 text-[16px] font-medium leading-[18px] text-white/90"
+                  >
+                    {g.title}
+                    <ChevronDown size={16} className={`transition-transform ${moreOpen ? '' : '-rotate-90'}`} />
+                  </button>
+                ) : (
+                  <div className="text-[16px] font-medium leading-[18px] text-white/90">{g.title}</div>
+                )}
+                {open && g.fields.map(renderField)}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
   )
 }
 

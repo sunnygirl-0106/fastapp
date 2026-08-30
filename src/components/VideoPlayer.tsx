@@ -55,84 +55,92 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
       <div
         ref={containerRef}
-        className="mx-auto flex h-full max-w-6xl flex-col rounded-xl border border-line bg-panel"
+        className="flex max-h-[92vh] w-[800px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* 头部：仅标题 + 关闭 */}
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div className="text-sm">镜头 {no2(shot.no)}</div>
-          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={18} />
+        {/* 头部：标题 + 关闭 */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">镜头 {no2(shot.no)}</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
           </button>
         </div>
 
-        {/* 画面 */}
-        <div className="flex flex-1 items-center justify-center overflow-hidden p-4">
-          <div className="relative h-full">
+        {/* 画面：9:16 居中 */}
+        <div className="flex flex-1 items-center justify-center overflow-hidden bg-black/20 p-4">
+          <div
+            className="h-full max-h-[70vh] cursor-pointer bg-cover bg-center"
+            style={{
+              aspectRatio: '9 / 16',
+              backgroundImage: url ? `url("${url}")` : undefined,
+              background: url ? undefined : 'linear-gradient(135deg,#2a2a2e,#141416)',
+            }}
+            onClick={() => setPlaying((p) => !p)}
+          />
+        </div>
+
+        {/* 控制条：播放/时间/进度 + 音量/速度/下载/全屏 */}
+        <div className="flex h-[52px] shrink-0 items-center gap-3 px-4">
+          <button
+            className="text-white/90 transition-colors hover:text-white"
+            onClick={() => setPlaying((p) => !p)}
+            title={playing ? '暂停' : '播放'}
+          >
+            {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+          </button>
+          <span className="text-[12px] tabular-nums text-white/60">
+            {mmss(t)} / {mmss(DURATION)}
+          </span>
+          <div className="group relative h-1 flex-1 cursor-pointer rounded-full bg-white/20" onClick={seek}>
+            <div className="absolute inset-y-0 left-0 rounded-full bg-white" style={{ width: `${(t / DURATION) * 100}%` }} />
             <div
-              className="h-full rounded-lg bg-cover bg-center"
-              style={{
-                aspectRatio: '9 / 16',
-                backgroundImage: url ? `url("${url}")` : undefined,
-                background: url ? undefined : 'linear-gradient(135deg,#2a2a2e,#141416)',
-              }}
-              onClick={() => setPlaying((p) => !p)}
+              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow transition-opacity group-hover:opacity-100"
+              style={{ left: `${(t / DURATION) * 100}%` }}
             />
+          </div>
 
-            {/* 控件条：播放/时间/进度 + 音量/速度/下载/全屏 */}
-            <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 rounded-b-lg bg-gradient-to-t from-black/75 to-transparent px-4 py-3">
-              <button onClick={() => setPlaying((p) => !p)} title={playing ? '暂停' : '播放'}>
-                {playing ? <Pause size={18} /> : <Play size={18} />}
+          <div className="flex items-center gap-4 text-white/70">
+            {/* 音量 */}
+            <button className="transition-colors hover:text-white" onClick={() => setMuted((m) => !m)} title="音量">
+              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+
+            {/* 播放速度 */}
+            <div className="relative">
+              <button
+                className="text-[13px] font-medium transition-colors hover:text-white"
+                onClick={() => setSpeedOpen((o) => !o)}
+                title="播放速度"
+              >
+                {rate}x
               </button>
-              <span className="text-xs tabular-nums text-white/80">
-                {mmss(t)} / {mmss(DURATION)}
-              </span>
-              <div className="relative h-1 flex-1 cursor-pointer rounded bg-white/25" onClick={seek}>
-                <div className="absolute inset-y-0 left-0 rounded bg-white" style={{ width: `${(t / DURATION) * 100}%` }} />
-              </div>
-
-              {/* 音量 */}
-              <button className="text-muted hover:text-white" onClick={() => setMuted((m) => !m)} title="音量">
-                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-              </button>
-
-              {/* 播放速度 */}
-              <div className="relative">
-                <button
-                  className="rounded px-1.5 text-xs text-white/80 hover:bg-white/10"
-                  onClick={() => setSpeedOpen((o) => !o)}
-                  title="播放速度"
-                >
-                  {rate}x
-                </button>
-                {speedOpen && (
-                  <div className="absolute bottom-7 right-0 rounded-lg border border-line bg-panel py-1 shadow-xl">
-                    {SPEEDS.map((s) => (
-                      <button
-                        key={s}
-                        className={`block w-16 px-3 py-1 text-left text-xs hover:bg-line ${s === rate ? 'text-brand' : 'text-white/80'}`}
-                        onClick={() => { setRate(s); setSpeedOpen(false) }}
-                      >
-                        {s}x
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 下载 */}
-              <button className="text-muted hover:text-white" onClick={() => showToast('已开始下载（示意）')} title="下载">
-                <Download size={18} />
-              </button>
-
-              {/* 全屏 */}
-              <button className="text-muted hover:text-white" onClick={toggleFullscreen} title="全屏">
-                <Maximize size={18} />
-              </button>
+              {speedOpen && (
+                <div className="absolute bottom-8 right-0 rounded-lg border border-white/10 bg-[#242628] py-1 shadow-xl backdrop-blur-[10px]">
+                  {SPEEDS.map((s) => (
+                    <button
+                      key={s}
+                      className={`block w-16 px-3 py-1 text-left text-[13px] hover:bg-white/5 ${s === rate ? 'text-brand' : 'text-white/80'}`}
+                      onClick={() => { setRate(s); setSpeedOpen(false) }}
+                    >
+                      {s}x
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* 下载 */}
+            <button className="transition-colors hover:text-white" onClick={() => showToast('已开始下载（示意）')} title="下载">
+              <Download size={18} />
+            </button>
+
+            {/* 全屏 */}
+            <button className="transition-colors hover:text-white" onClick={toggleFullscreen} title="全屏">
+              <Maximize size={18} />
+            </button>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { MoreHorizontal, Pencil, X } from 'lucide-react'
+import { MoreVertical, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -9,22 +9,47 @@ import {
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
-  Input,
-  Label,
   MenuItem,
-  Modal,
   ModelSelect,
   Overlay,
   PageHeader,
   Popover,
-  RefPlaceholder,
   Spinner,
   StaleNotice,
-  Textarea,
   fmt,
 } from '@/components/ui'
 import Lightbox from '@/components/Lightbox'
 import GenShotModal from './GenShotModal'
+import defaultCover from '@/assets/asset-cover-default.png'
+
+// 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
+const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
+
+/* ---------- 胶囊按钮（对齐设计稿） ---------- */
+function PillCTA({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={CTA_GRADIENT}
+      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
+
+function PillOutline({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5 disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function Step3Assets({ project }: { project: Project }) {
   const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots } = useStore()
@@ -68,25 +93,20 @@ export default function Step3Assets({ project }: { project: Project }) {
           a={a}
           onZoom={() => setLightbox(a)}
           onMenu={(e) => openMenu(a, e)}
-          onEdit={() => setEditFor(a.id)}
           onGen={() => setGenFor(a)}
         />
       ))
     )
 
-  // 固定卡宽 260–280，自动排列：大屏 5–6 列、中屏 4、小屏 2–3，卡片不随屏拉大
-  const gridCls = 'grid grid-cols-[repeat(auto-fill,minmax(260px,280px))] justify-start gap-4'
+  // 固定卡宽 210–230，自动排列：适中密度，卡片不随屏拉大
+  const gridCls = 'grid grid-cols-[repeat(auto-fill,minmax(210px,230px))] justify-start gap-4'
 
   return (
     <div>
       <PageHeader
         title="角色与场景"
         desc="完善角色与场景的设定和参考图，可以让后续画面更加一致。"
-        right={
-          <Button variant="ghost" size="sm" onClick={() => setReextract(true)}>
-            重新提取
-          </Button>
-        }
+        right={<PillOutline onClick={() => setReextract(true)}>重新提取</PillOutline>}
       />
 
       {project.assetStale && (
@@ -106,21 +126,21 @@ export default function Step3Assets({ project }: { project: Project }) {
 
       {/* 底部主操作栏：两种形态 */}
       {missing.length > 0 ? (
-        <ActionBar>
+        <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
           <button className="text-[13px] text-muted hover:text-white" onClick={() => setShotOpen(true)}>
             跳过参考图，继续生成镜头
           </button>
-          <Button variant="primary" size="lg" onClick={() => setBatchOpen(true)}>
-            生成全部参考图 · <Diamond />
-            {fmt(missing.length * COST.assetImgEach)}
-          </Button>
+          <PillCTA onClick={() => setBatchOpen(true)}>
+            <span className="text-[12px] leading-none">✦</span>
+            {fmt(missing.length * COST.assetImgEach)} 生成全部参考图
+          </PillCTA>
         </ActionBar>
       ) : (
         <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
-          <Button variant="primary" size="lg" onClick={() => setShotOpen(true)}>
-            生成镜头设计 · <Diamond />
-            {fmt(project.segments.length * COST.shotGenEach)}
-          </Button>
+          <PillCTA onClick={() => setShotOpen(true)}>
+            <span className="text-[12px] leading-none">✦</span>
+            {fmt(project.segments.length * COST.shotGenEach)} 生成镜头设计
+          </PillCTA>
         </ActionBar>
       )}
 
@@ -206,11 +226,8 @@ export default function Step3Assets({ project }: { project: Project }) {
           <MenuItem onClick={() => { setGenFor(menu.a); setMenu(null) }}>
             {menu.a.imgState === 'done' ? 'AI 重新生成图片' : 'AI 生成图片'}
           </MenuItem>
-          <MenuItem
-            disabled={menu.a.imgState !== 'done'}
-            onClick={() => { useStore.getState().showToast('已开始下载（示意）'); setMenu(null) }}
-          >
-            下载参考图
+          <MenuItem onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
+            编辑{menu.a.kind === 'char' ? '角色' : '场景'}设定
           </MenuItem>
           <MenuItem
             disabled={menu.a.imgState !== 'done'}
@@ -248,102 +265,69 @@ function AssetCard({
   a,
   onZoom,
   onMenu,
-  onEdit,
   onGen,
 }: {
   a: Asset
   onZoom: () => void
   onMenu: (e: React.MouseEvent) => void
-  onEdit: () => void
   onGen: () => void
 }) {
   const done = a.imgState === 'done'
   const generating = a.imgState === 'generating'
   const kindCn = a.kind === 'char' ? '角色' : '场景'
+  const subtitle = generating ? '正在生成参考图…' : done ? kindCn : '待生成参考图'
 
-  const onCardClick = () => {
+  const onCoverClick = () => {
     if (done) onZoom()
-    else if (a.imgState === 'none') onEdit()
+    else if (a.imgState === 'none') onGen()
     // generating：无响应
   }
 
   return (
-    <div
-      onClick={onCardClick}
-      tabIndex={generating ? -1 : 0}
-      className={`group relative flex aspect-square flex-col overflow-hidden rounded-xl border border-line bg-panel outline-none transition-colors focus-visible:border-brand/60 ${
-        generating ? 'cursor-default' : 'cursor-pointer hover:border-brand/50'
-      }`}
-    >
-      {/* 已生成：图片铺底 */}
-      {done && a.imageUrl && (
-        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${a.imageUrl}")` }} />
-      )}
-
-      {/* 生成中：骨架 */}
-      {generating && (
-        <div className="skeleton absolute inset-0 flex items-center justify-center">
-          <span className="inline-flex items-center gap-2 text-xs text-muted">
-            <Spinner size={13} /> 正在生成参考图…
-          </span>
-        </div>
-      )}
-
-      {/* 未生成：图标空态常显；hover/聚焦/触控时叠加遮罩 + 淡入两个按钮 */}
-      {a.imgState === 'none' && (
-        <div className="relative z-[1] flex flex-1 flex-col">
-          <div className="flex flex-1 items-center justify-center">
-            <RefPlaceholder kind={a.kind} name={a.name} />
+    <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-panel transition-colors hover:border-white/15">
+      {/* 封面：正方形，铺满 —— 已生成用参考图，否则用默认封面图（对齐 Figma node 20:53） */}
+      <div
+        onClick={onCoverClick}
+        tabIndex={generating ? -1 : 0}
+        className={`relative aspect-square overflow-hidden bg-panel2 outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
+          generating ? 'cursor-default' : 'cursor-pointer'
+        }`}
+      >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url("${done && a.imageUrl ? a.imageUrl : defaultCover}")` }}
+        />
+        {generating && (
+          <div className="skeleton absolute inset-0 flex items-center justify-center">
+            <span className="inline-flex items-center gap-2 text-xs text-muted">
+              <Spinner size={13} /> 正在生成参考图…
+            </span>
           </div>
-          <div className="reveal pointer-events-none absolute inset-0 bg-black/30" />
-          <div className="reveal relative flex items-center justify-center gap-2 px-3 pb-3">
-            <Button size="sm" onClick={stop(onEdit)}>编辑设定</Button>
-            <Button size="sm" variant="primary" onClick={stop(onGen)}>
-              生成参考图
-            </Button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* 右上角 ⋯：默认隐藏，hover/聚焦/触控揭示 */}
-      {!generating && (
-        <button
-          title="更多"
-          className="reveal absolute right-2.5 top-2.5 z-[2] flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white/90 hover:bg-black/70"
-          onClick={(e) => {
-            e.stopPropagation()
-            onMenu(e)
-          }}
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      )}
-
-      {/* 已生成：底部信息条常显名称；「编辑设定」随揭示淡入 */}
-      {done && (
-        <div className="relative z-[1] mt-auto bg-gradient-to-t from-black/85 via-black/45 to-transparent p-4 pt-10">
-          <div className="flex items-end justify-between gap-2">
-            <div>
-              <div className="text-[17px] font-semibold text-white">{a.name}</div>
-              <div className="mt-0.5 text-xs text-muted">{kindCn}</div>
-            </div>
-            <button
-              onClick={stop(onEdit)}
-              className="reveal inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-white/70 transition-colors hover:text-white"
-            >
-              <Pencil size={12} /> 编辑设定
-            </button>
-          </div>
+      {/* 名称条：名字在下方，右侧竖向「⋮」更多操作（无 hover 操作） */}
+      <div className="flex items-center justify-between gap-2 px-4 py-3.5">
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-medium leading-tight text-white">{a.name}</div>
+          <div className="mt-1.5 truncate text-[12px] leading-none text-white/40">{subtitle}</div>
         </div>
-      )}
+        {!generating && (
+          <button
+            title="更多操作"
+            aria-label="更多操作"
+            className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation()
+              onMenu(e)
+            }}
+          >
+            <MoreVertical size={18} />
+          </button>
+        )}
+      </div>
     </div>
   )
-}
-
-// 阻止卡片点击穿透的小工具
-const stop = (fn: () => void) => (e: React.MouseEvent) => {
-  e.stopPropagation()
-  fn()
 }
 
 function ResChips({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -353,8 +337,8 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
         <button
           key={r}
           onClick={() => onChange(r)}
-          className={`rounded-lg border px-3 py-1 text-sm ${
-            value === r ? 'border-brand text-brand' : 'border-line text-muted hover:text-white'
+          className={`flex h-9 items-center rounded-xl border px-3 text-sm font-medium transition-colors ${
+            value === r ? 'border-brand text-brand' : 'border-white/20 text-white hover:border-white/40'
           }`}
         >
           {r}
@@ -364,7 +348,7 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
   )
 }
 
-/* 单张参考图生成：大图弹窗 —— 可编辑提示词 + 模型/比例/分辨率 + 消耗 */
+/* 单张参考图生成弹窗（对齐 Figma node 6:3453）：可编辑提示词 + 模型/比例/分辨率 + 消耗 */
 function GenAssetImageModal({
   a,
   balance,
@@ -379,47 +363,56 @@ function GenAssetImageModal({
   const kindCn = a.kind === 'char' ? '角色' : '场景'
   const [prompt, setPrompt] = useState(a.prompt)
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('9:16')
+  const [ratio, setRatio] = useState('1:1')
   const [res, setRes] = useState('1K')
   const cost = COST.assetImgEach
   const ok = prompt.trim().length > 0
 
   return (
-    <Modal title={`AI 生成${kindCn}参考图 · ${a.name}`} width={880} onClose={onClose}>
-      <Textarea
-        rows={9}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
-        className="text-[13.5px] leading-relaxed"
-      />
-
-      <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-        <div>
-          <Label>图片模型</Label>
-          <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} width={176} />
-        </div>
-        <div>
-          <Label>画面比例</Label>
-          <ModelSelect value={ratio} options={['9:16', '16:9', '1:1', '4:3', '3:4']} onChange={setRatio} width={104} />
-        </div>
-        <div>
-          <Label>分辨率</Label>
-          <ResChips value={res} onChange={setRes} />
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[86vh] w-[660px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+        {/* 头部 */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">AI 生成{kindCn}（{a.name}）</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
+          </button>
         </div>
 
-        <div className="ml-auto flex items-center gap-5">
-          <div className="text-[13px] text-muted">
-            合计预计消耗 <span className="font-semibold text-brand">{fmt(cost)}</span> 星钻（1 张）
+        {/* 内容 */}
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
+          <textarea
+            rows={6}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
+            className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
+          />
+
+          <div className="flex flex-wrap items-center gap-4">
+            <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} variant="pill" width={148} />
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] text-white">画面比例</span>
+              <ModelSelect value={ratio} options={['1:1', '9:16', '16:9', '4:3', '3:4']} onChange={setRatio} variant="pill" width={84} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] text-white">分辨率</span>
+              <ResChips value={res} onChange={setRes} />
+            </div>
           </div>
-          <Button variant="primary" disabled={!ok} onClick={() => onConfirm({ prompt })}>
+        </div>
+
+        {/* 底部 */}
+        <div className="flex h-16 shrink-0 items-center justify-end gap-4 px-5 pb-5">
+          <div className="text-[14px] text-white/60">
+            合计预计消耗 <span className="text-brand">{fmt(cost)}</span> 星钻（1 张）· 余额 {fmt(balance)}
+          </div>
+          <PillCTA disabled={!ok} onClick={() => onConfirm({ prompt })}>
             确认生成
-          </Button>
+          </PillCTA>
         </div>
       </div>
-
-      <div className="mt-3 text-[12px] text-faint">当前余额 {fmt(balance)} 星钻 · 提示词可编辑，将用于本次生成</div>
-    </Modal>
+    </Overlay>
   )
 }
 
@@ -439,7 +432,7 @@ function BatchModal({
     Object.fromEntries(assets.map((a) => [a.id, a.prompt])),
   )
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('9:16')
+  const [ratio, setRatio] = useState('1:1')
   const [res, setRes] = useState('1K')
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -460,32 +453,36 @@ function BatchModal({
     onGen(sel, edits)
   }
 
-  const renderGroup = (title: string, list: Asset[], kindCn: string) =>
+  const renderGroup = (title: string, list: Asset[], kindCn: string, divider: boolean) =>
     list.length === 0 ? null : (
-      <div className="mb-5">
-        <div className="mb-2.5 text-[14px] font-semibold text-brand">
-          {title}（{list.length}）
+      <div className={divider ? 'border-b border-white/5 pb-6' : ''}>
+        <div className="mb-3 text-[16px] font-medium text-white">
+          {title}
+          <span className="text-[#525252]">（{list.length}）</span>
         </div>
         <div className="space-y-3">
           {list.map((a) => {
             const on = sel.includes(a.id)
             return (
-              <div
-                key={a.id}
-                className="rounded-xl border border-line/60 bg-panel2/30 px-4 py-3 transition-colors focus-within:bg-panel2/60"
-              >
+              <div key={a.id} className="flex flex-col gap-3">
                 <label className="flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={on} onChange={() => toggle(a.id)} className="accent-brand" />
-                  <span className={`text-[14px] font-medium ${on ? 'text-brand' : 'text-white/80'}`}>{a.name}</span>
-                  <span className="rounded bg-panel2 px-1.5 py-0.5 text-[11px] text-muted">{kindCn}</span>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggle(a.id)}
+                    className="h-[18px] w-[18px] rounded accent-brand"
+                  />
+                  <span className="text-[14px] font-semibold text-white">{a.name}</span>
+                  <span className="rounded-full bg-black/60 px-3 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-[6px]">
+                    {kindCn}
+                  </span>
                 </label>
-                <Textarea
-                  rows={3}
-                  dim
+                <textarea
+                  rows={4}
                   value={prompts[a.id] ?? ''}
                   onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
-                  className="mt-2.5 text-[13px] leading-relaxed"
                   placeholder={`描述「${a.name}」的外观与画面风格`}
+                  className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
                 />
               </div>
             )
@@ -496,54 +493,69 @@ function BatchModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="flex max-h-[86vh] w-[880px] max-w-[92vw] flex-col rounded-xl border border-line bg-panel shadow-2xl">
+      <div className="flex max-h-[86vh] w-[640px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
         {/* 头部 */}
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <div className="text-[15px] font-semibold">一键补全参考图</div>
-          <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={16} />
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">一键补全参考图</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
           </button>
         </div>
 
-        {/* 列表（可滚动） */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {renderGroup('角色', chars, '角色')}
-          {renderGroup('场景', scenes, '场景')}
+        {/* 角色 / 场景 列表（可滚动） */}
+        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-6">
+          {renderGroup('角色', chars, '角色', scenes.length > 0)}
+          {renderGroup('场景', scenes, '场景', false)}
         </div>
 
-        {/* 底部控制条 */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line px-5 py-3.5">
-          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
-            <input type="checkbox" checked={allOn} onChange={toggleAll} className="accent-brand" />
-            已选 {sel.length}/{assets.length}
-          </label>
-          <div>
-            <div className="mb-1 text-[12px] text-muted">图片模型</div>
-            <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} width={160} />
+        {/* 全选提示 */}
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 px-5 pt-2">
+          <input
+            type="checkbox"
+            checked={allOn}
+            onChange={toggleAll}
+            className="h-[18px] w-[18px] rounded accent-brand"
+          />
+          <span className="text-[12px] text-white/60">
+            已选择 {sel.length}/{assets.length} 个，可取消个别参考图
+          </span>
+        </label>
+
+        {/* 参数：模型 / 画面比例 / 分辨率 */}
+        <div className="flex shrink-0 flex-wrap items-center gap-4 px-5 py-3">
+          <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} variant="pill" width={148} />
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-white">画面比例</span>
+            <ModelSelect
+              value={ratio}
+              options={['1:1', '9:16', '16:9', '4:3', '3:4']}
+              onChange={setRatio}
+              variant="pill"
+              width={84}
+            />
           </div>
-          <div>
-            <div className="mb-1 text-[12px] text-muted">画面比例</div>
-            <ModelSelect value={ratio} options={['9:16', '16:9', '1:1', '4:3', '3:4']} onChange={setRatio} width={100} />
-          </div>
-          <div>
-            <div className="mb-1 text-[12px] text-muted">分辨率</div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-white">分辨率</span>
             <ResChips value={res} onChange={setRes} />
           </div>
-          <div className="ml-auto flex items-center gap-5">
-            <div className="text-[13px] text-muted">
-              合计预计消耗 <span className="font-semibold text-brand">{fmt(cost)}</span> 星钻（{sel.length} 张）
-            </div>
-            <Button variant="primary" disabled={!sel.length} onClick={confirm}>
-              生成（{sel.length}）
-            </Button>
+        </div>
+
+        {/* 底部：消耗 + 确认 */}
+        <div className="flex h-16 shrink-0 items-center justify-end gap-4 px-5 pb-5">
+          <div className="flex items-center gap-1 text-[14px] text-[#999]">
+            <Diamond />
+            合计预计消耗<span className="text-brand">{fmt(cost)}星钻</span>（{sel.length}张）
           </div>
+          <PillCTA disabled={!sel.length} onClick={confirm}>
+            确认生成（{sel.length}）
+          </PillCTA>
         </div>
       </div>
     </Overlay>
   )
 }
 
-/* 居中设定弹窗：名称与描述一起在点「保存」时提交 */
+/* 居中设定弹窗（对齐 Figma node 6:3861）：名称只读展示，描述与参考图描述可编辑，点「保存」提交 */
 function AssetSettingModal({
   a,
   onClose,
@@ -554,41 +566,71 @@ function AssetSettingModal({
   onSave: (patch: Partial<Asset>) => void
 }) {
   const isChar = a.kind === 'char'
-  const [name, setName] = useState(a.name)
+  const kindCn = isChar ? '角色' : '场景'
   const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
 
+  const boxCls =
+    'w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
+
   return (
-    <Modal
-      title={isChar ? '编辑角色设定' : '编辑场景设定'}
-      width={640}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            variant="primary"
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+        {/* 头部 */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">编辑{kindCn}设定</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* 内容 */}
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
+          {/* 名称（只读展示） */}
+          <div className="flex flex-col gap-2">
+            <div className="text-[14px] text-white/60">{kindCn}名称</div>
+            <div className="text-[16px] font-medium text-white">{a.name}</div>
+          </div>
+
+          {/* 描述 */}
+          <div className="flex flex-col gap-3">
+            <div className="text-[14px] text-white/60">{kindCn}描述</div>
+            <textarea
+              rows={5}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder={`描述「${a.name}」的设定`}
+              className={boxCls}
+            />
+          </div>
+
+          {/* 参考图描述 */}
+          <div className="flex flex-col gap-3">
+            <div className="text-[14px] text-white/60">参考图描述</div>
+            <textarea
+              rows={6}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={`描述「${a.name}」的外观与画面风格`}
+              className={boxCls}
+            />
+            <div className="text-[14px] text-white/40">用于生成{kindCn}参考图</div>
+          </div>
+        </div>
+
+        {/* 底部 */}
+        <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
+          <PillOutline onClick={onClose}>取消</PillOutline>
+          <PillCTA
             onClick={() => {
-              onSave({ name: name.trim() || a.name, desc, prompt })
+              onSave({ desc, prompt })
               onClose()
             }}
           >
             保存
-          </Button>
-        </>
-      }
-    >
-      <div className="mb-4">
-        <Label>{isChar ? '角色名称' : '场景名称'}</Label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </PillCTA>
+        </div>
       </div>
-
-      <Label>{isChar ? '角色描述' : '场景描述'}</Label>
-      <Textarea rows={5} value={desc} onChange={(e) => setDesc(e.target.value)} />
-      <div className="h-3" />
-      <Label>参考图描述</Label>
-      <Textarea rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="mt-1 text-[12px] text-faint">用于生成{isChar ? '角色' : '场景'}参考图</div>
-    </Modal>
+    </Overlay>
   )
 }
