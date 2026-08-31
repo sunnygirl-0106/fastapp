@@ -423,7 +423,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { setDetailId(menu.s.id); setMenu(null) }}>编辑镜头详情</MenuItem>
-          <MenuItem onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem>
+          <MenuItem onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该分镜</MenuItem>
           <MenuItem onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
           <MenuItem danger onClick={() => { deleteShot(menu.s.id); setMenu(null) }}>
             删除镜头
