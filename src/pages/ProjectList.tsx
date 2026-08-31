@@ -135,7 +135,7 @@ export default function ProjectList() {
 
                       {menuId === p.id && (
                         <div
-                          className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-lg border border-white/10 bg-[#1c1e20] py-1 shadow-xl shadow-black/40"
+                          className="absolute left-full top-1 ml-2 z-20 w-36 overflow-hidden rounded-lg border border-white/10 bg-[#1c1e20] py-1 shadow-xl shadow-black/40"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
