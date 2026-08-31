@@ -22,6 +22,7 @@ export default function ProjectList() {
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [renameId, setRenameId] = useState<string | null>(null)
   const [renameName, setRenameName] = useState('')
@@ -35,6 +36,7 @@ export default function ProjectList() {
 
   const startRename = (id: string, current: string) => {
     setMenuId(null)
+    setMenuPos(null)
     setRenameId(id)
     setRenameName(current)
   }
@@ -127,15 +129,23 @@ export default function ProjectList() {
                         }`}
                         onClick={(e) => {
                           e.stopPropagation()
-                          setMenuId(menuId === p.id ? null : p.id)
+                          if (menuId === p.id) {
+                            setMenuId(null)
+                            setMenuPos(null)
+                          } else {
+                            const r = e.currentTarget.getBoundingClientRect()
+                            setMenuPos({ x: r.right + 6, y: r.bottom + 6 })
+                            setMenuId(p.id)
+                          }
                         }}
                       >
                         <MoreVertical size={15} />
                       </button>
 
-                      {menuId === p.id && (
+                      {menuId === p.id && menuPos && (
                         <div
-                          className="absolute left-full top-1 ml-2 z-20 w-36 overflow-hidden rounded-lg border border-white/10 bg-[#1c1e20] py-1 shadow-xl shadow-black/40"
+                          className="fixed z-30 w-36 overflow-hidden rounded-lg border border-white/10 bg-[#1c1e20] py-1 shadow-xl shadow-black/40"
+                          style={{ left: menuPos.x, top: menuPos.y }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
@@ -183,7 +193,15 @@ export default function ProjectList() {
       </div>
 
       {/* 点击空白关闭卡片菜单 */}
-      {menuId && <div className="fixed inset-0 z-10" onClick={() => setMenuId(null)} />}
+      {menuId && (
+        <div
+          className="fixed inset-0 z-20"
+          onClick={() => {
+            setMenuId(null)
+            setMenuPos(null)
+          }}
+        />
+      )}
 
       {renameId && (
         <Modal
