@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Project } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import { Diamond, ModelSelect, Overlay, fmt } from '@/components/ui'
+import { Diamond, LockNotice, ModelSelect, Overlay, fmt } from '@/components/ui'
 
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
@@ -145,6 +145,8 @@ export default function GenShotModal({
             </span>
             <span className="text-white">余额：{fmt(project.balance)} 星钻</span>
           </div>
+
+          <LockNotice>开始后「角色与场景」将锁定，仅供查看、不可再编辑</LockNotice>
         </div>
 
         {/* 底部 */}

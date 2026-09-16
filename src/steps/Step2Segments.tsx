@@ -171,6 +171,7 @@ export default function Step2Segments({ project, locked }: { project: Project; l
           model={<ModelSelect value={extractModel} options={MODEL_OPTIONS.text} onChange={setExtractModel} variant="field" width={220} />}
           cost={COST.assetExtract}
           balance={project.balance}
+          notice={<>开始后「剧本拆解」将锁定，仅供查看、不可再编辑</>}
           confirmText="确认并开始提取"
           onClose={() => setExtractOpen(false)}
           onConfirm={() => {

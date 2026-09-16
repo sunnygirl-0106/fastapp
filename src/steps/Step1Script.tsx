@@ -148,6 +148,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           model={<ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} variant="field" width={220} />}
           cost={COST.segGen}
           balance={project.balance}
+          notice={<>开始后「剧本」将锁定，仅供查看、不可再编辑</>}
           confirmText="确认并开始拆解"
           onClose={() => setConfirm(false)}
           onConfirm={handleConfirm}

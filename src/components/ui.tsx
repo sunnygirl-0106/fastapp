@@ -408,6 +408,16 @@ function Row({ label, value }: { label: ReactNode; value: ReactNode }) {
 // 浅青渐变主按钮（与首页 CTA 一致）
 const CONFIRM_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
 
+/* ---------- 锁定提示：确认弹窗里「这一步走完就回不来了」的一行小字 ---------- */
+export function LockNotice({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-amber-300/90">
+      <Lock size={12} className="mt-[3px] shrink-0" />
+      <span>{children}</span>
+    </div>
+  )
+}
+
 /* ---------- 全站唯一的星钻确认弹窗（对齐设计稿：#1c1e20 深色壳 + 深色明细面板 + 胶囊按钮） ---------- */
 export function GenerateConfirmModal({
   title,
@@ -419,6 +429,7 @@ export function GenerateConfirmModal({
   balance,
   confirmText,
   extra,
+  notice,
   disabled,
   onConfirm,
   onClose,
@@ -433,6 +444,8 @@ export function GenerateConfirmModal({
   balance: number
   confirmText: string
   extra?: ReactNode
+  /** 不可逆提示：紧贴确认按钮上方，提醒本步开始后将被锁定 */
+  notice?: ReactNode
   disabled?: boolean
   onConfirm: () => void
   onClose: () => void
@@ -470,6 +483,7 @@ export function GenerateConfirmModal({
             />
             <Row label="当前余额" value={`${fmt(balance)} 星钻`} />
           </div>
+          {notice && <LockNotice>{notice}</LockNotice>}
         </div>
 
         {/* 底部操作 */}
