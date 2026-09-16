@@ -70,7 +70,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
         {/* 头部：标题 + 关闭 */}
         <div className="flex h-16 shrink-0 items-center gap-4 border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">镜头 {no2(shot.no)}</div>
-          {versions.length > 1 && (
+          {versions.length > 0 && (
             <div className="inline-flex items-center gap-0.5 rounded-[10px] border border-white/10 bg-black/30 p-1">
               {versions.map((v) => (
                 <button

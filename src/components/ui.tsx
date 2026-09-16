@@ -374,7 +374,7 @@ export function PageHeader({
 
 /* ---------- 已锁定角标：一枚小锁，hover 出 tooltip ----------
    步骤 1/2/3 完成后只读 */
-export function LockedBadge({ text = '已完成该步骤，内容已锁定，不可再编辑，仅供查看' }: { text?: string }) {
+export function LockedBadge({ text = '该步骤已用于后续生成，仅供查看' }: { text?: string }) {
   return (
     <span className="group relative inline-flex">
       <Lock size={14} className="cursor-help text-faint transition-colors group-hover:text-white/70" aria-label={text} />

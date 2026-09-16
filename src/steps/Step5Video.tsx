@@ -115,7 +115,7 @@ export default function Step5Video({ project }: { project: Project }) {
                 <div className="flex items-center justify-between">
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-[16px] font-medium text-white">镜头 {no2(s.no)}</span>
-                    {done && version && version.tag !== 'v1' && (
+                    {done && version && (
                       <span className="rounded-full border border-line px-1.5 py-0.5 text-[11px] leading-none text-white/50">
                         {version.tag}
                       </span>

@@ -80,7 +80,7 @@ export default function StepBar({ project }: { project: Project }) {
               <button
                 disabled={notReached}
                 onClick={() => !notReached && goStep(n)}
-                title={notReached ? '完成上一步后解锁' : readonly[i] ? '已完成，仅供查看' : ''}
+                title={notReached ? '完成上一步后解锁' : readonly[i] ? '该步骤已用于后续生成，仅供查看' : ''}
                 className={`flex w-[100px] shrink-0 flex-col items-center gap-[13px] bg-transparent ${
                   notReached ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
