@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, Maximize, Pause, Play, Volume2, VolumeX, X } from 'lucide-react'
 import type { Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { no2 } from '@/utils/project'
+import { no2, preferredVersion } from '@/utils/project'
 import videoPoster from '@/assets/placeholders/frame-5.jpg'
 
 const DURATION = 15
@@ -18,7 +18,12 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
   const raf = useRef<number>()
   const last = useRef<number>(performance.now())
   const containerRef = useRef<HTMLDivElement>(null)
-  const url = shot.video.versions[0]?.url
+
+  // 同一镜头的多个版本在这里切换查看；默认打开当前版本
+  const versions = shot.video.versions
+  const [tag, setTag] = useState(() => preferredVersion(shot.video)?.tag)
+  const active = versions.find((v) => v.tag === tag) ?? versions[versions.length - 1]
+  const url = active?.url
 
   useEffect(() => {
     const loop = (now: number) => {
@@ -59,13 +64,35 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
       <div
         ref={containerRef}
-        className="flex max-h-[92vh] w-[800px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)]"
+        className="flex max-h-[90vh] w-[1120px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 头部：标题 + 关闭 */}
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+        <div className="flex h-16 shrink-0 items-center gap-4 border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">镜头 {no2(shot.no)}</div>
-          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+          {versions.length > 1 && (
+            <div className="inline-flex items-center gap-0.5 rounded-[10px] border border-white/10 bg-black/30 p-1">
+              {versions.map((v) => (
+                <button
+                  key={v.tag}
+                  onClick={() => { setTag(v.tag); setT(0) }}
+                  title={`查看 ${v.tag}`}
+                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium leading-none transition-colors ${
+                    v.tag === active?.tag
+                      ? 'bg-brand/15 text-brand'
+                      : 'text-white/45 hover:bg-white/5 hover:text-white/80'
+                  }`}
+                >
+                  {v.tag}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            className="ml-auto text-white/50 transition-colors hover:text-white"
+            onClick={onClose}
+            aria-label="关闭"
+          >
             <X size={14} />
           </button>
         </div>
@@ -73,7 +100,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
         {/* 画面：9:16 竖屏居中（无真实视频时用占位图，保证不为空） */}
         <div className="flex items-center justify-center overflow-hidden bg-black/20 p-4">
           <div
-            className="aspect-[9/16] h-[68vh] max-h-[560px] cursor-pointer overflow-hidden rounded-md bg-cover bg-center"
+            className="aspect-[9/16] h-[min(calc(90vh_-_148px),620px)] max-w-full cursor-pointer overflow-hidden rounded-md bg-cover bg-center"
             style={{ backgroundImage: `url("${url ?? videoPoster}")` }}
             onClick={() => setPlaying((p) => !p)}
           />

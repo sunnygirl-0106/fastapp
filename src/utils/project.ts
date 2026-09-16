@@ -1,4 +1,11 @@
-import type { Project } from '@/types'
+import type { Project, ShotVideo, VideoVersion } from '@/types'
+
+/* ---------- 镜头视频版本 ----------
+   一个镜头可以有多个版本（v1/v2/…），旧版本永远保留。
+   取当前偏好版本；没有标记时回退到最新生成的那个。 */
+export function preferredVersion(v: ShotVideo): VideoVersion | undefined {
+  return v.versions.find((x) => x.preferred) ?? v.versions[v.versions.length - 1]
+}
 
 /* ---------- 时间格式：今天 / 昨天 / 具体日期 ---------- */
 export function formatCreatedAt(ts: number): string {
@@ -57,9 +64,9 @@ export function isDone(p: Project): boolean {
 export function projectCover(p: Project): string | undefined {
   // 1. 镜号最靠前的已完成视频封面
   const doneShots = p.shots
-    .filter((s) => s.video.state === 'done' && s.video.versions[0]?.url)
+    .filter((s) => s.video.state === 'done' && preferredVersion(s.video)?.url)
     .sort((a, b) => a.no - b.no)
-  if (doneShots.length) return doneShots[0].video.versions[0].url
+  if (doneShots.length) return preferredVersion(doneShots[0].video)!.url
 
   // 2. 第一张已生成的场景参考图
   const scene = p.assets.find((a) => a.kind === 'scene' && a.imgState === 'done' && a.imageUrl)

@@ -3,7 +3,7 @@ import { Upload } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import { ActionBar, GenerateConfirmModal, ModelSelect, PageHeader, Spinner } from '@/components/ui'
+import { ActionBar, GenerateConfirmModal, LockedBadge, ModelSelect, PageHeader, Spinner } from '@/components/ui'
 
 // 浅青渐变主按钮（对齐 Figma node 6:2239，与其它步骤 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
@@ -20,9 +20,10 @@ function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; o
   )
 }
 
-export default function Step1Script({ project }: { project: Project }) {
+export default function Step1Script({ project, locked }: { project: Project; locked: boolean }) {
   const setScript = useStore((s) => s.setScript)
   const startSegments = useStore((s) => s.startSegments)
+  const goStep = useStore((s) => s.goStep)
   const [text, setText] = useState(project.script)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [confirm, setConfirm] = useState(false)
@@ -70,10 +71,12 @@ export default function Step1Script({ project }: { project: Project }) {
       <PageHeader
         title="添加剧本内容"
         desc="粘贴小说、短剧剧本或剧本梗概，AI 将把内容拆解成适合生成视频的剧本段落。"
+        badge={locked && <LockedBadge />}
         right={
           <button
+            disabled={locked}
             onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-1.5 text-[13px] text-muted transition-colors hover:text-white"
+            className="inline-flex items-center gap-1.5 text-[13px] text-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted"
           >
             <Upload size={14} className="text-faint" />
             上传剧本
@@ -91,14 +94,18 @@ export default function Step1Script({ project }: { project: Project }) {
 
       <textarea
         value={text}
-        onChange={(e) => onChange(e.target.value)}
+        readOnly={locked}
+        onChange={(e) => !locked && onChange(e.target.value)}
         onBlur={() => {
+          if (locked) return
           if (t.current) clearTimeout(t.current)
           setScript(text)
           setStatus('saved')
         }}
         placeholder="在这里粘贴或输入剧本内容…"
-        className="min-h-[420px] w-full resize-y rounded-xl border border-line bg-panel px-5 py-4 text-sm leading-7 outline-none placeholder:text-faint focus:border-brand/50"
+        className={`min-h-[420px] w-full resize-y rounded-xl border border-line bg-panel px-5 py-4 text-sm leading-7 outline-none placeholder:text-faint ${
+          locked ? 'cursor-default text-white/70 focus:border-line' : 'focus:border-brand/50'
+        }`}
       />
 
       <div className="mt-2 flex items-center justify-between text-xs">
@@ -106,27 +113,33 @@ export default function Step1Script({ project }: { project: Project }) {
           {chars > 0 ? `${chars} 字` : '输入剧本内容后即可开始拆解'}
         </span>
         <span className="inline-flex items-center gap-1.5 text-faint">
-          {status === 'saving' && (
+          {!locked && status === 'saving' && (
             <>
               <Spinner size={11} /> 正在保存…
             </>
           )}
-          {status === 'saved' && <span className="text-brand">已保存</span>}
+          {!locked && status === 'saved' && <span className="text-brand">已保存</span>}
         </span>
       </div>
 
-      <ActionBar left={chars > 0 ? '拆解后可在下一步查看和编辑剧本段落' : undefined}>
-        <PillCTA disabled={chars === 0} onClick={() => setConfirm(true)}>
-          {chars > 0 ? (
-            <>
-              <span className="text-[12px] leading-none">✦</span>
-              {COST.segGen} 拆解剧本
-            </>
-          ) : (
-            '请先添加剧本内容'
-          )}
-        </PillCTA>
-      </ActionBar>
+      {locked ? (
+        <ActionBar left="该步骤已锁定，内容仅供查看">
+          <PillCTA onClick={() => goStep(2)}>下一步：剧本拆解</PillCTA>
+        </ActionBar>
+      ) : (
+        <ActionBar left={chars > 0 ? '拆解后可在下一步查看和编辑剧本段落' : undefined}>
+          <PillCTA disabled={chars === 0} onClick={() => setConfirm(true)}>
+            {chars > 0 ? (
+              <>
+                <span className="text-[12px] leading-none">✦</span>
+                {COST.segGen} 拆解剧本
+              </>
+            ) : (
+              '请先添加剧本内容'
+            )}
+          </PillCTA>
+        </ActionBar>
+      )}
 
       {confirm && (
         <GenerateConfirmModal

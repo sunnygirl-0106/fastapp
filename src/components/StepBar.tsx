@@ -15,6 +15,13 @@ export function stepUnlocked(p: Project): boolean[] {
   ]
 }
 
+// 锁定规则：下一步一旦开始生成，本步即只读（第 N 步解锁 ⇔ 第 N-1 步上锁）
+// 第 4、5 步永不上锁：改镜头 → video.stale →「需重新生成」是这两步的核心价值
+export function stepLocked(p: Project): boolean[] {
+  const u = stepUnlocked(p)
+  return [u[1], u[2], u[3], false, false]
+}
+
 export function stepDone(p: Project): boolean[] {
   const vids = p.shots.map((s) => s.video.state)
   return [
@@ -57,6 +64,7 @@ export default function StepBar({ project }: { project: Project }) {
   const goStep = useStore((s) => s.goStep)
   const unlocked = stepUnlocked(project)
   const done = stepDone(project)
+  const readonly = stepLocked(project)
 
   const stateOf = (i: number): NodeState => (step === i + 1 ? 'active' : done[i] ? 'done' : 'todo')
 
@@ -66,15 +74,15 @@ export default function StepBar({ project }: { project: Project }) {
         {STEPS.map((name, i) => {
           const n = i + 1
           const st = stateOf(i)
-          const locked = !unlocked[i]
+          const notReached = !unlocked[i]
           return (
             <Fragment key={n}>
               <button
-                disabled={locked}
-                onClick={() => !locked && goStep(n)}
-                title={locked ? '完成上一步后解锁' : ''}
+                disabled={notReached}
+                onClick={() => !notReached && goStep(n)}
+                title={notReached ? '完成上一步后解锁' : readonly[i] ? '已完成，仅供查看' : ''}
                 className={`flex w-[100px] shrink-0 flex-col items-center gap-[13px] bg-transparent ${
-                  locked ? 'cursor-not-allowed' : 'cursor-pointer'
+                  notReached ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
               >
                 {/* 菱形节点 */}

@@ -9,12 +9,12 @@ import {
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
+  LockedBadge,
   ModelSelect,
   Overlay,
   PageHeader,
   Popover,
   Spinner,
-  StaleNotice,
   fmt,
 } from '@/components/ui'
 import Lightbox from '@/components/Lightbox'
@@ -50,8 +50,9 @@ function PillOutline({ children, onClick, disabled }: { children: ReactNode; onC
   )
 }
 
-export default function Step3Assets({ project }: { project: Project }) {
-  const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots } = useStore()
+export default function Step3Assets({ project, locked }: { project: Project; locked: boolean }) {
+  const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots, goStep } =
+    useStore()
   const st = project.assetStatus
   const chars = project.assets.filter((a) => a.kind === 'char')
   const scenes = project.assets.filter((a) => a.kind === 'scene')
@@ -90,6 +91,7 @@ export default function Step3Assets({ project }: { project: Project }) {
         <AssetCard
           key={a.id}
           a={a}
+          locked={locked}
           onZoom={() => setLightbox(a)}
           onMenu={(e) => openMenu(a, e)}
           onGen={() => setGenFor(a)}
@@ -105,16 +107,13 @@ export default function Step3Assets({ project }: { project: Project }) {
       <PageHeader
         title="角色与场景"
         desc="完善角色与场景的设定和参考图，可以让后续画面更加一致。"
-        right={<PillOutline onClick={() => setReextract(true)}>重新提取</PillOutline>}
+        badge={locked && <LockedBadge />}
+        right={
+          <PillOutline disabled={locked} onClick={() => setReextract(true)}>
+            重新提取
+          </PillOutline>
+        }
       />
-
-      {project.assetStale && (
-        <StaleNotice
-          text="剧本已重新拆解，建议重新提取角色与场景。"
-          actionText="重新提取"
-          onAction={() => setReextract(true)}
-        />
-      )}
 
       <Section title="角色" count={chars.length}>
         <div className={gridCls}>{renderCards(chars, '暂无角色')}</div>
@@ -123,12 +122,13 @@ export default function Step3Assets({ project }: { project: Project }) {
         <div className={gridCls}>{renderCards(scenes, '暂无场景')}</div>
       </Section>
 
-      {/* 底部主操作栏：两种形态 */}
-      {missing.length > 0 ? (
+      {/* 底部主操作栏：锁定后只留导航，未锁定时区分「补全参考图」与「生成镜头」 */}
+      {locked ? (
+        <ActionBar left="该步骤已锁定，内容仅供查看">
+          <PillCTA onClick={() => goStep(4)}>下一步：镜头设计</PillCTA>
+        </ActionBar>
+      ) : missing.length > 0 ? (
         <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
-          <button className="text-[13px] text-muted hover:text-white" onClick={() => setShotOpen(true)}>
-            跳过参考图，继续生成镜头
-          </button>
           <PillCTA onClick={() => setBatchOpen(true)}>
             <span className="text-[12px] leading-none">✦</span>
             {fmt(missing.length * COST.assetImgEach)} 生成全部参考图
@@ -288,11 +288,13 @@ function Section({ title, count, children }: { title: string; count: number; chi
 
 function AssetCard({
   a,
+  locked,
   onZoom,
   onMenu,
   onGen,
 }: {
   a: Asset
+  locked: boolean
   onZoom: () => void
   onMenu: (e: React.MouseEvent) => void
   onGen: () => void
@@ -300,12 +302,21 @@ function AssetCard({
   const done = a.imgState === 'done'
   const generating = a.imgState === 'generating'
   const kindCn = a.kind === 'char' ? '角色' : '场景'
-  const subtitle = generating ? '正在生成参考图…' : done ? kindCn : '待生成参考图'
+  // 锁定且无图时不说「待生成」——那暗示一个此时做不到的动作
+  const subtitle = generating
+    ? '正在生成参考图…'
+    : done
+      ? kindCn
+      : locked
+        ? '未生成参考图'
+        : '待生成参考图'
 
+  // 锁定后只剩「有图可放大」，无图则完全无响应
+  const inert = generating || (locked && !done)
   const onCoverClick = () => {
+    if (inert) return
     if (done) onZoom()
     else if (a.imgState === 'none') onGen()
-    // generating：无响应
   }
 
   return (
@@ -313,9 +324,9 @@ function AssetCard({
       {/* 封面：正方形，铺满 —— 已生成用参考图，否则用默认封面图（对齐 Figma node 20:53） */}
       <div
         onClick={onCoverClick}
-        tabIndex={generating ? -1 : 0}
+        tabIndex={inert ? -1 : 0}
         className={`relative aspect-square overflow-hidden bg-panel2 outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
-          generating ? 'cursor-default' : 'cursor-pointer'
+          inert ? 'cursor-default' : 'cursor-pointer'
         }`}
       >
         <div
@@ -339,9 +350,10 @@ function AssetCard({
         </div>
         {!generating && (
           <button
-            title="更多操作"
+            disabled={locked}
+            title={locked ? '' : '更多操作'}
             aria-label="更多操作"
-            className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white"
+            className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/50"
             onClick={(e) => {
               e.stopPropagation()
               onMenu(e)

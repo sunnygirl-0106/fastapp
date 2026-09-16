@@ -41,6 +41,7 @@ export interface VideoVersion {
   tag: string // v1
   preferred: boolean
   url?: string
+  createdAt: number // 生成时间：成片页按此倒序，最新生成的排最前
 }
 
 export interface ShotVideo {
@@ -81,8 +82,6 @@ export interface Project {
   segments: Segment[]
   assets: Asset[]
   shots: Shot[]
-  assetStale?: boolean // 故事重新拆解后 → 角色与场景需重新提取
-  shotStale?: boolean // 拆解或角色场景变更后 → 镜头需重新生成
 }
 
 // 分镜字段的中文标签与分组（编辑抽屉/快照复用）

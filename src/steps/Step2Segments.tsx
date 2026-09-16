@@ -10,6 +10,7 @@ import {
   GenerateConfirmModal,
   GeneratingState,
   InlineRename,
+  LockedBadge,
   Modal,
   ModelSelect,
   Overlay,
@@ -61,7 +62,7 @@ function PillOutline({
   )
 }
 
-export default function Step2Segments({ project }: { project: Project }) {
+export default function Step2Segments({ project, locked }: { project: Project; locked: boolean }) {
   const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
   const [regenOpen, setRegenOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -73,7 +74,6 @@ export default function Step2Segments({ project }: { project: Project }) {
   const st = project.segStatus
   const segs = project.segments
   const assetStatus = project.assetStatus
-  const assetStale = !!project.assetStale
 
   if (st === 'generating') {
     return (
@@ -98,10 +98,13 @@ export default function Step2Segments({ project }: { project: Project }) {
       <PageHeader
         title="剧本拆解"
         desc={`共 ${segs.length} 个剧本段落`}
+        badge={locked && <LockedBadge />}
         right={
           <>
-            <PillOutline onClick={() => setRegenOpen(true)}>重新拆解</PillOutline>
-            <PillPrimary onClick={() => setAddOpen(true)}>
+            <PillOutline disabled={locked} onClick={() => setRegenOpen(true)}>
+              重新拆解
+            </PillOutline>
+            <PillPrimary disabled={locked} onClick={() => setAddOpen(true)}>
               <Plus size={14} strokeWidth={2.5} /> 新增剧本段落
             </PillPrimary>
           </>
@@ -113,6 +116,7 @@ export default function Step2Segments({ project }: { project: Project }) {
           <ParagraphCard
             key={s.id}
             seg={s}
+            locked={locked}
             onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
             onDelete={() => setConfirmDel(s)}
           />
@@ -126,7 +130,6 @@ export default function Step2Segments({ project }: { project: Project }) {
 
       <BottomBar
         assetStatus={assetStatus}
-        assetStale={assetStale}
         disabled={segs.length === 0}
         onExtract={() => setExtractOpen(true)}
         onNext={() => goStep(3)}
@@ -200,13 +203,11 @@ export default function Step2Segments({ project }: { project: Project }) {
 /* ---------- 底部主按钮：区分「往前走」与「重做」 ---------- */
 function BottomBar({
   assetStatus,
-  assetStale,
   disabled,
   onExtract,
   onNext,
 }: {
   assetStatus: Project['assetStatus']
-  assetStale: boolean
   disabled: boolean
   onExtract: () => void
   onNext: () => void
@@ -219,23 +220,12 @@ function BottomBar({
       </ActionBar>
     )
   }
-  // 已提取且未变脏：直接往前，不扣费、不显示价格
-  if (assetStatus === 'done' && !assetStale) {
+  // 已提取：直接往前，不扣费、不显示价格（此分支必然处于锁定态）
+  if (assetStatus === 'done') {
     return (
-      <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
+      <ActionBar left="该步骤已锁定，内容仅供查看">
         <PillPrimary disabled={disabled} onClick={onNext}>
           下一步：角色与场景
-        </PillPrimary>
-      </ActionBar>
-    )
-  }
-  // 已变脏：重新提取（带价格）
-  if (assetStale) {
-    return (
-      <ActionBar left="剧本段落有改动，重新提取可让角色与场景保持同步">
-        <PillPrimary disabled={disabled} onClick={onExtract}>
-          <span className="text-[15px] leading-none">✦</span>
-          {COST.assetExtract} 重新提取角色与场景
         </PillPrimary>
       </ActionBar>
     )
@@ -254,10 +244,12 @@ function BottomBar({
 /* ---------- 段落卡片 ---------- */
 function ParagraphCard({
   seg,
+  locked,
   onRenameTitle,
   onDelete,
 }: {
   seg: Segment
+  locked: boolean
   onRenameTitle: (v: string) => void
   onDelete: () => void
 }) {
@@ -277,7 +269,9 @@ function ParagraphCard({
     <div className="rounded-lg border border-white/10 bg-[#111213] p-4">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium tabular-nums text-white/40">{no2(seg.no)}</span>
-        {editing ? (
+        {locked ? (
+          <span className="text-left text-sm font-medium leading-snug text-white">{seg.title}</span>
+        ) : editing ? (
           <InlineRename
             value={seg.title}
             className="text-sm font-medium"
@@ -299,10 +293,11 @@ function ParagraphCard({
         <span className="text-sm tabular-nums text-white/40">{fmtDur(seg.dur)}</span>
         <button
           type="button"
-          title="删除段落"
+          disabled={locked}
+          title={locked ? '' : '删除段落'}
           aria-label="删除段落"
           onClick={onDelete}
-          className="ml-auto rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400"
+          className="ml-auto rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/40"
         >
           <Trash2 size={14} />
         </button>

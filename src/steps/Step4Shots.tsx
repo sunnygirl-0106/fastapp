@@ -13,7 +13,6 @@ import {
   PageHeader,
   Popover,
   SaveBadge,
-  StaleNotice,
   fmt,
 } from '@/components/ui'
 import GenShotModal from './GenShotModal'
@@ -219,14 +218,6 @@ export default function Step4Shots({ project }: { project: Project }) {
         desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.length * 15} 秒。`}
         right={<PillOutline onClick={() => setGenOpen(true)}>重新生成镜头</PillOutline>}
       />
-
-      {project.shotStale && (
-        <StaleNotice
-          text="角色与场景已更新，建议重新生成镜头。"
-          actionText="重新生成镜头"
-          onAction={() => setGenOpen(true)}
-        />
-      )}
 
       {/* 工具条：字段 / 筛选 + 已加条件 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -39,10 +39,11 @@ export function delay(ms: number): Promise<void> {
 
 // 生成参考图/视频用的"缩略图"：从真实占位图池里按 seed 稳定取一张
 // 同一资产/镜头始终对应同一张图；不同对象分散取图，接近真实生成效果
-export function mockImage(_label: string, seed: string): string {
+// offset：同一镜头的第 n 个视频版本往后挪一格，保证 v1/v2/v3 画面互不相同
+export function mockImage(_label: string, seed: string, offset = 0): string {
   let h = 0
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
-  return IMAGE_POOL[h % IMAGE_POOL.length]
+  return IMAGE_POOL[(h + offset) % IMAGE_POOL.length]
 }
 
 let seq = 0

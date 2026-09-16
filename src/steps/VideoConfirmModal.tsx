@@ -1,5 +1,6 @@
-import { MODELS, COST } from '@/services/generation'
-import { FakeSelect, GenerateConfirmModal, Label } from '@/components/ui'
+import { useState } from 'react'
+import { MODELS, MODEL_OPTIONS, COST } from '@/services/generation'
+import { FakeSelect, GenerateConfirmModal, Label, ModelSelect } from '@/components/ui'
 
 export default function VideoConfirmModal({
   count,
@@ -12,13 +13,17 @@ export default function VideoConfirmModal({
   onClose: () => void
   onConfirm: () => void
 }) {
+  const [model, setModel] = useState<string>(MODELS.video)
+
   return (
     <GenerateConfirmModal
       title="确认生成视频"
       what={`将为选中的 ${count} 个镜头生成视频。`}
       count={`${count} 段视频`}
       modelLabel="视频模型"
-      model={MODELS.video}
+      model={
+        <ModelSelect value={model} options={MODEL_OPTIONS.video} onChange={setModel} variant="field" width={220} />
+      }
       cost={count * COST.videoEach}
       balance={balance}
       confirmText={`确认并生成 ${count} 段视频`}

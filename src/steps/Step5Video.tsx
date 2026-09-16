@@ -3,7 +3,7 @@ import { Download, Monitor, MoreVertical, Play, X } from 'lucide-react'
 import type { Project, Shot } from '@/types'
 import { SHOT_GROUPS, SHOT_FIELDS } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { no2 } from '@/utils/project'
+import { no2, preferredVersion } from '@/utils/project'
 import { ActionBar, Overlay, PageHeader, Popover } from '@/components/ui'
 import VideoPlayer from '@/components/VideoPlayer'
 import generatingPlaceholder from '@/assets/video-generating-placeholder.png'
@@ -13,7 +13,7 @@ const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
 
-// 描边胶囊：重新生成镜头（对齐 Figma node 6:5342）
+// 描边胶囊：重新生成视频（对齐 Figma node 6:5342）
 function PillOutline({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
   return (
     <button
@@ -42,6 +42,8 @@ function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; o
 export default function Step5Video({ project }: { project: Project }) {
   const showToast = useStore((s) => s.showToast)
   const goStep = useStore((s) => s.goStep)
+  // 镜头集合是固定的，所以一个镜头一张卡；同一镜头的多个版本挂在卡下面，
+  // 点开播放器切换查看。
   const vids = project.shots.filter((s) => s.video.state !== 'none')
 
   const [play, setPlay] = useState<Shot | null>(null)
@@ -63,20 +65,21 @@ export default function Step5Video({ project }: { project: Project }) {
   const total = vids.length
   const doneCount = vids.filter((s) => s.video.state === 'done').length
   const allDone = doneCount === total
+  const clipCount = vids.reduce((n, s) => n + s.video.versions.length, 0)
 
   return (
     <div>
       {allDone ? (
         <PageHeader
           title="视频成片"
-          desc={`${vids.length} 段视频已全部生成。`}
-          right={<PillOutline onClick={() => goStep(4)}>重新生成镜头</PillOutline>}
+          desc={`${total} 个镜头，共 ${clipCount} 段视频。同一镜头的每次重新生成都会保留为一个新版本。`}
+          right={<PillOutline onClick={() => goStep(4)}>重新生成视频</PillOutline>}
         />
       ) : (
         <PageHeader
           title="正在生成视频"
           desc="正在逐段生成视频，请保持页面打开。"
-          right={<PillOutline onClick={() => goStep(4)}>重新生成镜头</PillOutline>}
+          right={<PillOutline onClick={() => goStep(4)}>重新生成视频</PillOutline>}
         />
       )}
 
@@ -85,6 +88,8 @@ export default function Step5Video({ project }: { project: Project }) {
       <div className="flex flex-wrap gap-4">
         {vids.map((s) => {
           const done = s.video.state === 'done'
+          const version = preferredVersion(s.video)
+          const cover = (done && version?.url) || generatingPlaceholder
           return (
             <div
               key={s.id}
@@ -96,7 +101,7 @@ export default function Step5Video({ project }: { project: Project }) {
                 className={`group relative flex aspect-[226/221] w-full items-center justify-center overflow-hidden bg-cover bg-center ${
                   done ? 'cursor-pointer' : 'cursor-default'
                 }`}
-                style={{ backgroundImage: `url("${generatingPlaceholder}")` }}
+                style={{ backgroundImage: `url("${cover}")` }}
               >
                 {done && (
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition group-hover:bg-black/60">
@@ -108,7 +113,14 @@ export default function Step5Video({ project }: { project: Project }) {
               {/* 信息条：镜头名 + 更多；状态 + 时长 */}
               <div className="flex flex-col gap-2 px-5 py-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-[16px] font-medium text-white">镜头 {no2(s.no)}</div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-[16px] font-medium text-white">镜头 {no2(s.no)}</span>
+                    {done && version && version.tag !== 'v1' && (
+                      <span className="rounded-full border border-line px-1.5 py-0.5 text-[11px] leading-none text-white/50">
+                        {version.tag}
+                      </span>
+                    )}
+                  </div>
                   <button
                     className="text-white/60 transition-colors hover:text-white"
                     title="更多"
@@ -133,7 +145,7 @@ export default function Step5Video({ project }: { project: Project }) {
         })}
       </div>
 
-      <ActionBar left={allDone ? `${vids.length} 段视频已全部生成` : `正在生成视频 · 已完成 ${doneCount}/${total}`}>
+      <ActionBar left={allDone ? `${total} 个镜头 · 共 ${clipCount} 段视频` : `正在生成视频 · 已完成 ${doneCount}/${total}`}>
         <PillCTA disabled={!allDone} onClick={() => showToast('已开始批量下载（示意）')}>
           批量下载
         </PillCTA>

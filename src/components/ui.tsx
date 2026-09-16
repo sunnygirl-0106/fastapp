@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Image as ImageIcon, Loader2, User, X } from 'lucide-react'
+import { Check, ChevronDown, Image as ImageIcon, Loader2, Lock, User, X } from 'lucide-react'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -347,15 +347,41 @@ export function InlineRename({
 }
 
 /* ---------- 页头（各步骤主标题 + 说明） ---------- */
-export function PageHeader({ title, desc, right }: { title: string; desc?: string; right?: ReactNode }) {
+export function PageHeader({
+  title,
+  desc,
+  right,
+  badge,
+}: {
+  title: string
+  desc?: string
+  right?: ReactNode
+  badge?: ReactNode
+}) {
   return (
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
-        <h1 className="text-[20px] font-semibold">{title}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-[20px] font-semibold">{title}</h1>
+          {badge}
+        </div>
         {desc && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">{desc}</p>}
       </div>
       {right && <div className="flex shrink-0 items-center gap-2">{right}</div>}
     </div>
+  )
+}
+
+/* ---------- 已锁定角标：一枚小锁，hover 出 tooltip ----------
+   步骤 1/2/3 完成后只读 */
+export function LockedBadge({ text = '已完成该步骤，内容已锁定，不可再编辑，仅供查看' }: { text?: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <Lock size={14} className="cursor-help text-faint transition-colors group-hover:text-white/70" aria-label={text} />
+      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 w-max max-w-[360px] rounded-lg border border-line bg-panel px-3 py-2 text-[12px] font-normal leading-relaxed text-white/80 opacity-0 shadow-2xl transition-opacity group-hover:opacity-100">
+        {text}
+      </span>
+    </span>
   )
 }
 
@@ -530,26 +556,3 @@ export function RefPlaceholder({ kind, name }: { kind: 'char' | 'scene'; name?: 
     </div>
   )
 }
-
-/* ---------- 上游变更提示条 ---------- */
-export function StaleNotice({
-  text,
-  actionText,
-  onAction,
-}: {
-  text: string
-  actionText?: string
-  onAction?: () => void
-}) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-[13px]">
-      <span className="text-amber-200/90">{text}</span>
-      {actionText && (
-        <Button size="sm" onClick={onAction}>
-          {actionText}
-        </Button>
-      )}
-    </div>
-  )
-}
-

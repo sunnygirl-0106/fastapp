@@ -57,26 +57,22 @@ interface State {
   startVideos: (shotIds: string[]) => Promise<void> // Step4 → Step5
 }
 
-/* ---------- 下游失效标记（模块内私有） ---------- */
-function markStaleFromSegments(p: Project) {
-  if (p.assets.length) p.assetStale = true
-  if (p.shots.length) p.shotStale = true
-  p.shots.forEach((s) => {
-    if (s.video.state === 'done') s.video.stale = true
-  })
-}
-
-function markStaleFromAssets(p: Project) {
-  if (p.shots.length) p.shotStale = true
-  p.shots.forEach((s) => {
-    if (s.video.state === 'done') s.video.stale = true
-  })
+function backfillVersionTime(projects: Project[]): Project[] {
+  let t = 0
+  projects.forEach((p) =>
+    p.shots.forEach((s) =>
+      s.video.versions.forEach((v) => {
+        if (typeof v.createdAt !== 'number') v.createdAt = (t += 1)
+      }),
+    ),
+  )
+  return projects
 }
 
 function load(): Project[] {
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (raw) return JSON.parse(raw) as Project[]
+    if (raw) return backfillVersionTime(JSON.parse(raw) as Project[])
   } catch {
     /* ignore */
   }
@@ -133,7 +129,6 @@ export const useStore = create<State>((set, get) => {
       p.balance -= COST.segGen
       p.segments = sampleSegments()
       p.segStatus = 'done'
-      markStaleFromSegments(p)
     })
     get().showToast('已生成 3 个剧本段落')
   }
@@ -149,8 +144,6 @@ export const useStore = create<State>((set, get) => {
         return old && old.imgState === 'done' ? { ...a, imgState: 'done', imageUrl: old.imageUrl } : a
       })
       p.assetStatus = 'done'
-      p.assetStale = false
-      markStaleFromAssets(p)
     })
     get().showToast('已提取 2 个角色、1 个场景')
   }
@@ -159,10 +152,18 @@ export const useStore = create<State>((set, get) => {
     await delay(1600)
     patchProject((p) => {
       p.balance -= COST.shotGenEach * segNos.length
+      // 已生成的视频是用户资产：镜头重新生成时按 id 承接，版本号继续往后排（v2 → v3…）。
+      // 镜头内容变了，旧视频保留但标记为需重新生成。
+      const prev = new Map(p.shots.map((s) => [s.id, s.video]))
       const all = sampleShots()
-      p.shots = all.filter((s) => segNos.includes(s.no)).map((s, i) => ({ ...s, no: i + 1 }))
+      p.shots = all
+        .filter((s) => segNos.includes(s.no))
+        .map((s, i) => {
+          const video = prev.get(s.id)
+          if (!video) return { ...s, no: i + 1 }
+          return { ...s, no: i + 1, video: { ...video, stale: video.state === 'done' || video.stale } }
+        })
       p.shotStatus = 'done'
-      p.shotStale = false
     })
     get().showToast(`已生成 ${segNos.length} 个镜头`)
   }
@@ -176,7 +177,15 @@ export const useStore = create<State>((set, get) => {
         if (s) {
           s.video.state = 'done'
           s.video.stale = false
-          s.video.versions = [{ tag: 'v1', preferred: true, url: mockImage(`镜头#${s.no}`, s.id) }]
+          // 每次生成都追加一个新版本：已生成的视频是用户付费得来的资产，绝不覆盖
+          const n = s.video.versions.length
+          s.video.versions.forEach((v) => (v.preferred = false))
+          s.video.versions.push({
+            tag: `v${n + 1}`,
+            preferred: true,
+            url: mockImage(`镜头#${s.no}`, s.id, n),
+            createdAt: Date.now(),
+          })
           p.balance -= COST.videoEach
         }
       })
@@ -252,7 +261,6 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const no = p.segments.length + 1
         p.segments.push({ id: uid('seg'), no, title: title.trim(), dur: '15s', text: text.trim() })
-        markStaleFromSegments(p)
       })
       get().showToast('已新增剧本段落')
     },
@@ -262,9 +270,8 @@ export const useStore = create<State>((set, get) => {
         const s = p.segments.find((x) => x.id === id)
         if (!s) return
         const next = title.trim() || s.title
-        if (next === s.title) return // 没变就不置脏
+        if (next === s.title) return
         s.title = next
-        markStaleFromSegments(p)
       })
     },
 
@@ -272,7 +279,6 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         p.segments = p.segments.filter((x) => x.id !== id)
         p.segments.forEach((s, i) => (s.no = i + 1))
-        markStaleFromSegments(p)
       })
       get().showToast('已删除剧本段落')
     },
