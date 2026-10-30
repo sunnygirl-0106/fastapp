@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Eraser, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
+import { Copy, Eraser, Eye, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -144,7 +144,7 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {/* 重新提取确认 */}
-      {reextract && (
+      {!locked && reextract && (
         <GenerateConfirmModal
           title="确认重新提取角色与场景"
           what="重新提取将重建角色与场景列表；已生成的参考图会尽量保留，下游镜头和视频会被标记为需要重新生成。"
@@ -154,6 +154,7 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
           confirmText="确认并重新提取"
           onClose={() => setReextract(false)}
           onConfirm={() => {
+            if (locked) return
             setReextract(false)
             extractAssets()
           }}
@@ -161,12 +162,13 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {/* 批量生成参考图 */}
-      {batchOpen && (
+      {!locked && batchOpen && (
         <BatchModal
           assets={missing}
           balance={project.balance}
           onClose={() => setBatchOpen(false)}
           onGen={async (ids, edits) => {
+            if (locked) return
             Object.entries(edits).forEach(([id, prompt]) => updateAsset(id, { prompt }))
             setBatchOpen(false)
             await generateAssetImages(ids)
@@ -175,12 +177,13 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {/* 单张生成参考图 */}
-      {genFor && (
+      {!locked && genFor && (
         <GenAssetImageModal
           a={genFor}
           balance={project.balance}
           onClose={() => setGenFor(null)}
           onConfirm={async (patch) => {
+            if (locked) return
             const id = genFor.id
             if (patch.prompt !== genFor.prompt) updateAsset(id, { prompt: patch.prompt })
             setGenFor(null)
@@ -189,7 +192,7 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
         />
       )}
 
-      {/* 编辑设定：居中弹窗 */}
+      {/* 设定：锁定时只读查看 */}
       {editFor &&
         (() => {
           const a = project.assets.find((x) => x.id === editFor)
@@ -197,8 +200,9 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
           return (
             <AssetSettingModal
               a={a}
+              readOnly={locked}
               onClose={() => setEditFor(null)}
-              onSave={(patch) => updateAsset(a.id, patch)}
+              onSave={(patch) => { if (!locked) updateAsset(a.id, patch) }}
             />
           )
         })()}
@@ -206,11 +210,12 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       {lightbox && <Lightbox title={lightbox.name} url={lightbox.imageUrl} onClose={() => setLightbox(null)} />}
 
       {/* 生成镜头设计弹窗（与 Step4 共用） */}
-      {shotOpen && (
+      {!locked && shotOpen && (
         <GenShotModal
           project={project}
           onClose={() => setShotOpen(false)}
           onConfirm={(segNos) => {
+            if (locked) return
             setShotOpen(false)
             startShots(segNos)
           }}
@@ -218,26 +223,31 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {menu && (
-        <Popover anchor={menu} width={168} variant="glass" onClose={() => setMenu(null)}>
-          <MenuRow icon={<Image size={16} />} onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
+        <Popover anchor={menu} width={locked ? 220 : 168} variant="glass" onClose={() => setMenu(null)}>
+          <MenuRow icon={<Image size={16} />} disabled={locked} onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
             选择本地图片
           </MenuRow>
-          <MenuRow icon={<Sparkles size={16} />} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
+          <MenuRow icon={<Sparkles size={16} />} disabled={locked} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
             {menu.a.imgState === 'done' ? 'AI 重新生成图片' : 'AI 生成图片'}
           </MenuRow>
-          <MenuRow icon={<Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
-            编辑{menu.a.kind === 'char' ? '角色' : '场景'}设定
+          <MenuRow icon={locked ? <Eye size={16} /> : <Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
+            {locked ? '查看' : '编辑'}{menu.a.kind === 'char' ? '角色' : '场景'}设定
           </MenuRow>
           <MenuRow
             icon={<Eraser size={16} />}
-            disabled={menu.a.imgState !== 'done'}
+            disabled={locked || menu.a.imgState !== 'done'}
             onClick={() => { clearAssetImage(menu.a.id); setMenu(null) }}
           >
             清除参考图
           </MenuRow>
-          <MenuRow icon={<Trash2 size={16} />} onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
+          <MenuRow icon={<Trash2 size={16} />} disabled={locked} onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
             删除{menu.a.kind === 'char' ? '角色' : '场景'}
           </MenuRow>
+          {locked && (
+            <div className="border-t border-white/10 pt-4 text-[12px] leading-[18px] text-white/40">
+              该步骤已锁定，仅可查看设定
+            </div>
+          )}
         </Popover>
       )}
     </div>
@@ -350,10 +360,9 @@ function AssetCard({
         </div>
         {!generating && (
           <button
-            disabled={locked}
-            title={locked ? '' : '更多操作'}
+            title={locked ? '查看设定' : '更多操作'}
             aria-label="更多操作"
-            className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/50"
+            className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
               onMenu(e)
@@ -592,8 +601,70 @@ function BatchModal({
   )
 }
 
-/* 居中设定弹窗（对齐 Figma node 6:3861）：名称只读展示，描述与参考图描述可编辑，点「保存」提交 */
+/* 锁定时只读查看，不挂载编辑表单或初始化编辑状态。 */
 function AssetSettingModal({
+  a,
+  readOnly = false,
+  onClose,
+  onSave,
+}: {
+  a: Asset
+  readOnly?: boolean
+  onClose: () => void
+  onSave: (patch: Partial<Asset>) => void
+}) {
+  if (!readOnly) return <EditableAssetSettingModal a={a} onClose={onClose} onSave={onSave} />
+
+  const kindCn = a.kind === 'char' ? '角色' : '场景'
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(a.prompt)
+      useStore.getState().showToast('已复制参考图描述')
+    } catch {
+      useStore.getState().showToast('复制失败，请手动选择文本')
+    }
+  }
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
+          <div className="text-base font-medium text-white">查看{kindCn}设定</div>
+          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="table-scroll flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
+          <div className="flex flex-col gap-2">
+            <div className="text-[12px] leading-[18px] text-white/40">{kindCn}名称</div>
+            <div className="whitespace-pre-line text-[16px] font-medium leading-5 text-white">{a.name || '—'}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-[12px] leading-[18px] text-white/40">{kindCn}描述</div>
+            <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">{a.desc || '—'}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[12px] leading-[18px] text-white/40">参考图描述</div>
+              {a.prompt && (
+                <button className="inline-flex items-center gap-1 text-[12px] text-white/50 hover:text-white" onClick={copyPrompt}>
+                  <Copy size={12} />
+                  复制
+                </button>
+              )}
+            </div>
+            <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">{a.prompt || '—'}</div>
+            <div className="text-[12px] leading-[18px] text-white/40">用于生成{kindCn}参考图</div>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  )
+}
+
+/* 居中设定弹窗（对齐 Figma node 6:3861）：名称只读展示，描述与参考图描述可编辑，点「保存」提交 */
+function EditableAssetSettingModal({
   a,
   onClose,
   onSave,
