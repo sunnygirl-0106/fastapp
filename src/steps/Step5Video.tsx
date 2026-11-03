@@ -136,8 +136,9 @@ export default function Step5Video({ project }: { project: Project }) {
                 <div className="flex items-center justify-between text-[12px]">
                   <span className={`font-medium ${done ? 'text-[#00d8dc]' : 'text-[#dcb400]'}`}>
                     {done ? '已完成' : '生成中'}
+                    {s.video.stale && <span className="text-amber-300" title={s.video.staleReason}> · 可重新生成</span>}
                   </span>
-                  <span className="text-white/40">15 秒</span>
+                  <span className="text-white/40">{preferredVersion(s.video)?.dur ?? s.dur} 秒</span>
                 </div>
               </div>
             </div>
@@ -183,6 +184,7 @@ export default function Step5Video({ project }: { project: Project }) {
 
             {/* 内容：只读，滑条仅悬浮时显示 */}
             <div className="table-scroll flex flex-col gap-6 overflow-y-auto px-6 py-6">
+              <div className="text-sm text-white/70">时长：{preferredVersion(info.video)?.dur ?? info.dur} 秒</div>
               {SHOT_GROUPS.map((g) => (
                 <div key={g.title} className="flex flex-col gap-4">
                   <div className="text-[16px] font-medium leading-[18px] text-white/90">{g.title}</div>

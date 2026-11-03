@@ -8,13 +8,14 @@ export interface ProjectConfig {
   ratio: string // 9:16 竖屏
   style: string // 写实
   mode: string // 全自动 AI 生成
+  segDur: number
 }
 
 export interface Segment {
   id: string
   no: number
   title: string
-  dur: string // '15s'
+  dur: number // 段落目标时长（秒）
   text: string // 原文
   scene?: string // 场景（截图里多为占位 —）
   roles?: string // 出场角色
@@ -41,16 +42,28 @@ export interface VideoVersion {
   tag: string // v1
   preferred: boolean
   url?: string
+  dur: number // 生成时的镜头时长
   createdAt: number // 生成时间：成片页按此倒序，最新生成的排最前
 }
 
 export interface ShotVideo {
   state: GenStatus
   versions: VideoVersion[]
+  staleReason?: string
   stale?: boolean // 镜头被重新生成后，旧视频标记为需重新生成
 }
 
+export type OutdatedKind = 'segText' | 'segDur' | 'asset'
+export interface OutdatedReason {
+  kind: OutdatedKind
+  key?: string
+  text: string
+}
+
 export interface Shot {
+  segId: string
+  dur: number
+  outdated?: OutdatedReason[]
   id: string
   no: number
   shot: string // 画面描述
@@ -74,6 +87,7 @@ export interface Project {
   createdAt: number
   updatedAt: number
   config: ProjectConfig
+  assetsHint?: boolean
   balance: number // 星钻余额（全局共享，这里挂项目上便于扣减演示）
   script: string
   segStatus: GenStatus

@@ -11,5 +11,14 @@ export default defineConfig(({ command }) => ({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  // 双入口：/ 是真实 5 步工作流；/proposal.html 是「修复」6 条的设计方案页
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        proposal: fileURLToPath(new URL('./proposal.html', import.meta.url)),
+      },
+    },
+  },
   server: { port: 5188, host: true },
 }))

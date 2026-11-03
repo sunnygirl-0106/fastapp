@@ -51,3 +51,5 @@ export function uid(prefix = 'id'): string {
   seq += 1
   return `${prefix}_${Date.now().toString(36)}_${seq}`
 }
+
+export const videoCost = (dur: number) => Math.round(COST.videoEach * dur / 15)

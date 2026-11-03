@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Project } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import { Diamond, LockNotice, ModelSelect, Overlay, fmt } from '@/components/ui'
+import { Diamond, ModelSelect, Overlay, fmt } from '@/components/ui'
 
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
@@ -38,7 +38,9 @@ export default function GenShotModal({
   project,
   onClose,
   onConfirm,
+  initialSelection,
 }: {
+  initialSelection?: number[]
   project: Project
   onClose: () => void
   onConfirm: (segNos: number[]) => void
@@ -46,13 +48,17 @@ export default function GenShotModal({
   const segs = project.segments
   const [style, setStyle] = useState('')
   const [model, setModel] = useState<string>(MODELS.text)
-  const [sel, setSel] = useState<number[]>(segs.map((s) => s.no))
+  const [sel, setSel] = useState<number[]>(() => {
+    if (initialSelection) return initialSelection
+    const pending = segs.filter((seg) => { const shot = project.shots.find((s) => s.segId === seg.id); return !shot || shot.outdated?.length })
+    return (pending.length ? pending : segs).map((s) => s.no)
+  })
   const toggle = (no: number) => setSel((s) => (s.includes(no) ? s.filter((x) => x !== no) : [...s, no]))
   const cost = sel.length * COST.shotGenEach
   const allSel = sel.length === segs.length
   const someSel = sel.length > 0 && !allSel
 
-  const cols = 'grid grid-cols-[52px_64px_1fr_84px]'
+  const cols = 'grid grid-cols-[52px_64px_1fr_84px_84px]'
 
   return (
     <Overlay onClose={onClose}>
@@ -100,12 +106,14 @@ export default function GenShotModal({
                 </div>
                 <div className="px-3">段号</div>
                 <div className="px-3">标题 / 剧本内容</div>
+                <div className="px-3">状态</div>
                 <div className="px-3">时长</div>
               </div>
               {/* 表体（可滚动） */}
               <div className="max-h-[288px] overflow-y-auto">
                 {segs.map((s) => {
                   const on = sel.includes(s.no)
+                  const shot = project.shots.find((shot) => shot.segId === s.id)
                   return (
                     <label
                       key={s.id}
@@ -126,7 +134,8 @@ export default function GenShotModal({
                         <div className="truncate text-[13px] text-white/90">{s.title}</div>
                         <div className="truncate text-[12px] text-white/50">{s.text}</div>
                       </div>
-                      <div className="px-3 text-[13px] text-white/70">{s.dur}</div>
+                      <div className={`px-3 text-[13px] ${!shot ? 'text-faint' : shot.outdated?.length ? 'text-amber-300' : 'text-brand'}`}>{!shot ? '未生成' : shot.outdated?.length ? '待更新' : '已生成'}</div>
+                      <div className="px-3 text-[13px] text-white/70">{s.dur} 秒</div>
                     </label>
                   )
                 })}
@@ -146,13 +155,13 @@ export default function GenShotModal({
             <span className="text-white">余额：{fmt(project.balance)} 星钻</span>
           </div>
 
-          <LockNotice>开始后「角色与场景」将锁定，仅供查看、不可再编辑</LockNotice>
+
         </div>
 
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-between px-5 pb-5">
           <div className="text-sm text-white/60">
-            已选 {sel.length}/{segs.length} 段
+            已选 {sel.length}/{segs.length} 段 · 共 {segs.filter((s) => sel.includes(s.no)).reduce((n, s) => n + s.dur, 0)} 秒
           </div>
           <div className="flex items-center gap-2">
             <button

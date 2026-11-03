@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="生成失败占位图">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17181a"/>
+      <stop offset="1" stop-color="#0d0e0f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="46%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.045"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a3b3f"/>
+      <stop offset="1" stop-color="#26272a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="400" height="400" fill="url(#bg)"/>
+  <rect width="400" height="400" fill="url(#glow)"/>
+
+  <!-- 底部起伏，与 cover-empty / asset-cover-default 的地平线呼应 -->
+  <path d="M0 322 C 74 296, 138 338, 206 318 C 268 300, 330 330, 400 308 L400 400 L0 400 Z" fill="#000000" opacity="0.32"/>
+  <path d="M0 348 C 88 328, 150 360, 226 344 C 296 330, 344 354, 400 340 L400 400 L0 400 Z" fill="#000000" opacity="0.26"/>
+
+  <!-- 断开的胶片画格：左右两半错位，中间留出裂口 -->
+  <g opacity="0.72">
+    <path d="M132 150 H110 a10 10 0 0 0 -10 10 v80 a10 10 0 0 0 10 10 h22"
+          fill="none" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M268 150 H290 a10 10 0 0 1 10 10 v80 a10 10 0 0 1 -10 10 h-22"
+          fill="none" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+    <!-- 片孔 -->
+    <g fill="#2e2f33">
+      <rect x="112" y="166" width="10" height="14" rx="3"/>
+      <rect x="112" y="193" width="10" height="14" rx="3"/>
+      <rect x="112" y="220" width="10" height="14" rx="3"/>
+      <rect x="278" y="166" width="10" height="14" rx="3"/>
+      <rect x="278" y="193" width="10" height="14" rx="3"/>
+      <rect x="278" y="220" width="10" height="14" rx="3"/>
+    </g>
+    <!-- 裂口：一道锯齿 -->
+    <path d="M186 138 L206 176 L186 200 L210 232 L192 262"
+          fill="none" stroke="#3a3b3f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

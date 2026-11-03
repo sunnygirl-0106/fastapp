@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { DurationStepper } from '@/components/DurationChip'
 import { Upload } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
@@ -26,6 +27,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
   const goStep = useStore((s) => s.goStep)
   const [text, setText] = useState(project.script)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [segDur, setSegDur] = useState(project.config.segDur)
   const [confirm, setConfirm] = useState(false)
   const [model, setModel] = useState<string>(MODELS.text)
   const t = useRef<ReturnType<typeof setTimeout>>()
@@ -63,7 +65,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
     setScript(text)
     setStatus('saved')
     setConfirm(false)
-    startSegments()
+    startSegments(segDur)
   }
 
   return (
@@ -146,6 +148,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           title="确认拆解剧本"
           what="AI 将根据当前内容生成剧本段落。"
           model={<ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} variant="field" width={220} />}
+          extra={<div className="space-y-2"><DurationStepper value={segDur} onChange={setSegDur} title="单段时长" /><p className="text-xs text-faint">AI 会按这个时长切分段落，每段时长可在下一步单独修改</p></div>}
           cost={COST.segGen}
           balance={project.balance}
           notice={<>开始后「剧本」将锁定，仅供查看、不可再编辑</>}

@@ -1,4 +1,4 @@
-import type { Project, ShotVideo, VideoVersion } from '@/types'
+import { SHOT_FIELDS, type Asset, type Project, type Shot, type ShotVideo, type VideoVersion } from '@/types'
 
 /* ---------- 镜头视频版本 ----------
    一个镜头可以有多个版本（v1/v2/…），旧版本永远保留。
@@ -88,4 +88,52 @@ export function projectCover(p: Project): string | undefined {
 
 /* ---------- 展示格式 ---------- */
 export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
-export const fmtDur = (d: string) => d.replace(/s$/i, ' 秒') // '15s' → '15 秒'
+export const fmtDur = (d: number | string) => `${parseInt(String(d), 10)} 秒`
+
+
+export function timeSlots(dur: number): [number, number][] {
+  const slots: [number, number][] = []
+  for (let start = 0; start < dur; start += 5) slots.push([start, Math.min(start + 5, dur)])
+  if (slots.length > 1 && slots[slots.length - 1][1] - slots[slots.length - 1][0] < 2) {
+    const last = slots.pop()!
+    slots[slots.length - 1][1] = last[1]
+  }
+  return slots
+}
+
+export function buildTimeline(beats: string[], dur: number): string {
+  const clean = beats.map((b) => b.replace(/^\s*\d+\s*[–—-]\s*\d+\s*秒[：:]\s*/, '').trim()).filter(Boolean)
+  const slots = timeSlots(dur)
+  return slots.map(([start, end], i) => `${start}–${end}秒：${(i === slots.length - 1 ? clean.slice(i).join('；') : clean[i]) || '保持当前画面与动作'}`).join('\n')
+}
+
+export const outdatedShots = (p: Project) => p.shots.filter((s) => s.outdated?.length)
+export const ungeneratedSegments = (p: Project) => p.segments.filter((s) => !p.shots.some((shot) => shot.segId === s.id))
+export function shotsReferencingAsset(p: Project, a: Asset): Shot[] {
+  return p.shots.filter((s) => {
+    const seg = p.segments.find((x) => x.id === s.segId)
+    return SHOT_FIELDS.some(({ key }) => String(s[key] ?? '').includes(a.name)) ||
+      !!seg?.text.includes(a.name) || (a.kind === 'scene' && !!seg && !!a.belongSegs?.includes(seg.no))
+  })
+}
+
+export function renameOccurrences(p: Project, name: string) {
+  const fields = [
+    ...p.segments.map((s) => ({ source: `段落 ${no2(s.no)} · 原文`, text: s.text })),
+    ...p.shots.flatMap((s) => SHOT_FIELDS.map((f) => ({ source: `镜头 ${no2(s.no)} · ${f.label}`, text: String(s[f.key] ?? '') }))),
+  ]
+  return fields.flatMap((f) => {
+    const hits: { source: string; before: string; after: string }[] = []
+    if (!name) return hits
+    let pos = f.text.indexOf(name)
+    while (pos >= 0) {
+      hits.push({ source: f.source, before: f.text.slice(Math.max(0, pos - 30), pos), after: f.text.slice(pos + name.length, pos + name.length + 30) })
+      pos = f.text.indexOf(name, pos + name.length)
+    }
+    return hits
+  })
+}
+export function shotGenerationBlocked(p: Project): string | undefined {
+  if (p.shotStatus === 'generating') return '正在生成镜头，完成后可操作'
+  if (p.assetStatus === 'generating') return '正在生成角色与场景，完成后可操作'
+}

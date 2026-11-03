@@ -1,16 +1,18 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
-import type { Project, Segment } from '@/types'
+import type { Project, Segment, Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import { no2, fmtDur } from '@/utils/project'
+import DurationChip, { DurationStepper } from '@/components/DurationChip'
+import { useAutoSave } from '@/hooks/useAutoSave'
+import { SaveBadge } from '@/components/ui'
+import { no2 } from '@/utils/project'
 import {
   ActionBar,
   Button,
   GenerateConfirmModal,
   GeneratingState,
   InlineRename,
-  LockedBadge,
   Modal,
   ModelSelect,
   Overlay,
@@ -62,13 +64,11 @@ function PillOutline({
   )
 }
 
-export default function Step2Segments({ project, locked }: { project: Project; locked: boolean }) {
-  const { generateSegments, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
-  const [regenOpen, setRegenOpen] = useState(false)
+export default function Step2Segments({ project }: { project: Project }) {
+  const { updateSegment, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
   const [addOpen, setAddOpen] = useState(false)
   const [extractOpen, setExtractOpen] = useState(false)
   const [confirmDel, setConfirmDel] = useState<Segment | null>(null)
-  const [regenModel, setRegenModel] = useState<string>(MODELS.text)
   const [extractModel, setExtractModel] = useState<string>(MODELS.text)
 
   const st = project.segStatus
@@ -97,14 +97,10 @@ export default function Step2Segments({ project, locked }: { project: Project; l
     <div>
       <PageHeader
         title="剧本拆解"
-        desc={`共 ${segs.length} 个剧本段落`}
-        badge={locked && <LockedBadge />}
+        desc={`共 ${segs.length} 个剧本段落 · 预计总时长 ${segs.reduce((n, s) => n + s.dur, 0)} 秒`}
         right={
           <>
-            <PillOutline disabled={locked} onClick={() => setRegenOpen(true)}>
-              重新拆解
-            </PillOutline>
-            <PillPrimary disabled={locked} onClick={() => setAddOpen(true)}>
+            <PillPrimary onClick={() => setAddOpen(true)}>
               <Plus size={14} strokeWidth={2.5} /> 新增剧本段落
             </PillPrimary>
           </>
@@ -116,7 +112,9 @@ export default function Step2Segments({ project, locked }: { project: Project; l
           <ParagraphCard
             key={s.id}
             seg={s}
-            locked={locked}
+            shot={project.shots.find((shot) => shot.segId === s.id)}
+            generating={project.shotStatus === 'generating'}
+            onUpdate={(patch) => updateSegment(s.id, patch)}
             onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
             onDelete={() => setConfirmDel(s)}
           />
@@ -129,6 +127,7 @@ export default function Step2Segments({ project, locked }: { project: Project; l
       </div>
 
       <BottomBar
+        assetsHint={project.assetsHint}
         assetStatus={assetStatus}
         disabled={segs.length === 0}
         onExtract={() => setExtractOpen(true)}
@@ -136,7 +135,7 @@ export default function Step2Segments({ project, locked }: { project: Project; l
       />
 
       {/* 新增剧本段落弹窗 */}
-      {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
+      {addOpen && <AddSegModal defaultDur={project.config.segDur} nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
 
       {/* 删除确认 */}
       {confirmDel && (
@@ -159,7 +158,10 @@ export default function Step2Segments({ project, locked }: { project: Project; l
             </>
           }
         >
-          <div className="text-sm text-white/85">确定删除「{confirmDel.title}」吗？删除后无法恢复。</div>
+          <div className="text-sm text-white/85">{(() => {
+            const shot = project.shots.find((s) => s.segId === confirmDel.id)
+            return shot ? `确定删除「${confirmDel.title}」吗？对应的镜头 ${no2(shot.no)} 及其 ${shot.video.versions.length} 个视频版本会一起删除，无法恢复。` : `确定删除「${confirmDel.title}」吗？删除后无法恢复。`
+          })()}</div>
         </Modal>
       )}
 
@@ -171,7 +173,6 @@ export default function Step2Segments({ project, locked }: { project: Project; l
           model={<ModelSelect value={extractModel} options={MODEL_OPTIONS.text} onChange={setExtractModel} variant="field" width={220} />}
           cost={COST.assetExtract}
           balance={project.balance}
-          notice={<>开始后「剧本拆解」将锁定，仅供查看、不可再编辑</>}
           confirmText="确认并开始提取"
           onClose={() => setExtractOpen(false)}
           onConfirm={() => {
@@ -181,33 +182,19 @@ export default function Step2Segments({ project, locked }: { project: Project; l
         />
       )}
 
-      {/* 重新拆解确认 */}
-      {regenOpen && (
-        <GenerateConfirmModal
-          title="确认重新拆解剧本"
-          what={`重新拆解将覆盖现有的 ${segs.length} 个剧本段落，已生成的角色、场景、镜头和视频会被标记为需要重新生成。`}
-          model={<ModelSelect value={regenModel} options={MODEL_OPTIONS.text} onChange={setRegenModel} variant="field" width={220} />}
-          cost={COST.segGen}
-          balance={project.balance}
-          confirmText="确认并重新拆解"
-          onClose={() => setRegenOpen(false)}
-          onConfirm={() => {
-            setRegenOpen(false)
-            generateSegments()
-          }}
-        />
-      )}
     </div>
   )
 }
 
 /* ---------- 底部主按钮：区分「往前走」与「重做」 ---------- */
 function BottomBar({
+  assetsHint,
   assetStatus,
   disabled,
   onExtract,
   onNext,
 }: {
+  assetsHint?: boolean
   assetStatus: Project['assetStatus']
   disabled: boolean
   onExtract: () => void
@@ -221,10 +208,10 @@ function BottomBar({
       </ActionBar>
     )
   }
-  // 已提取：直接往前，不扣费、不显示价格（此分支必然处于锁定态）
+  // 已提取：直接往前，可提示用户重新提取
   if (assetStatus === 'done') {
     return (
-      <ActionBar left="该步骤已锁定，内容仅供查看">
+      <ActionBar left={assetsHint ? '段落有修改，如出现新角色或场景，可在下一步重新提取' : undefined}>
         <PillPrimary disabled={disabled} onClick={onNext}>
           下一步：角色与场景
         </PillPrimary>
@@ -245,12 +232,16 @@ function BottomBar({
 /* ---------- 段落卡片 ---------- */
 function ParagraphCard({
   seg,
-  locked,
+  shot,
+  generating,
+  onUpdate,
   onRenameTitle,
   onDelete,
 }: {
   seg: Segment
-  locked: boolean
+  shot?: Shot
+  generating: boolean
+  onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>) => void
   onRenameTitle: (v: string) => void
   onDelete: () => void
 }) {
@@ -270,9 +261,7 @@ function ParagraphCard({
     <div className="rounded-lg border border-white/10 bg-[#111213] p-4">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium tabular-nums text-white/40">{no2(seg.no)}</span>
-        {locked ? (
-          <span className="text-left text-sm font-medium leading-snug text-white">{seg.title}</span>
-        ) : editing ? (
+        {editing ? (
           <InlineRename
             value={seg.title}
             className="text-sm font-medium"
@@ -291,11 +280,12 @@ function ParagraphCard({
             {seg.title}
           </button>
         )}
-        <span className="text-sm tabular-nums text-white/40">{fmtDur(seg.dur)}</span>
+        <DurationChip value={seg.dur} title="段落时长" disabled={generating} onSave={(dur) => onUpdate({ dur })} />
+        {!!shot?.outdated?.length && <span className="text-xs text-amber-300">镜头待更新</span>}
         <button
           type="button"
-          disabled={locked}
-          title={locked ? '' : '删除段落'}
+
+          title="删除段落"
           aria-label="删除段落"
           onClick={onDelete}
           className="ml-auto rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/40"
@@ -305,10 +295,10 @@ function ParagraphCard({
       </div>
 
       <div className="relative mt-2">
-        {/* 收起态：点击正文原地展开只读弹窗 */}
+        {/* 收起态：点击正文展开编辑浮层 */}
         <button
           type="button"
-          title="点击查看完整原文"
+          title="点击编辑原文"
           onClick={() => setOpen(true)}
           className="group/body block w-full cursor-pointer text-left"
         >
@@ -323,39 +313,26 @@ function ParagraphCard({
           )}
         </button>
 
-        {/* 展开态：原地浮层，微微高亮框，只读 */}
-        {open && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-            <div className="absolute -inset-x-1 -top-1 z-30 rounded-lg border border-white/15 bg-[#16181a]/95 px-4 py-3 shadow-xl shadow-black/50 backdrop-blur">
-              <p className="whitespace-pre-line text-[13px] leading-relaxed text-white/90">{seg.text}</p>
-              <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2">
-                <span className="text-[12px] text-white/40">只读</span>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="text-[12px] text-white/60 transition-colors hover:text-white"
-                >
-                  收起
-                </button>
-              </div>
-            </div>
-          </>
-        )}
+        {/* 展开态：自动保存编辑浮层 */}
+        {open && <SegmentTextEditor seg={seg} shot={shot} onSave={(text) => onUpdate({ text })} onClose={() => setOpen(false)} />}
+
       </div>
     </div>
   )
 }
 
 function AddSegModal({
+  defaultDur,
   nextNo,
   onClose,
   onAdd,
 }: {
+  defaultDur: number
   nextNo: number
   onClose: () => void
-  onAdd: (title: string, text: string) => void
+  onAdd: (title: string, text: string, dur: number) => void
 }) {
+  const [dur, setDur] = useState(defaultDur)
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const ok = title.trim() && text.trim()
@@ -389,6 +366,7 @@ function AddSegModal({
               className={boxCls}
             />
           </div>
+          <DurationStepper value={dur} onChange={setDur} />
           <div className="flex flex-col gap-2">
             <div className="text-[14px] text-white/60">剧本原文</div>
             <textarea
@@ -404,11 +382,39 @@ function AddSegModal({
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
           <PillOutline onClick={onClose}>取消</PillOutline>
-          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text); onClose() }}>
+          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text, dur); onClose() }}>
             添加
           </PillPrimary>
         </div>
       </div>
     </Overlay>
   )
+}
+
+
+function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?: Shot; onSave: (text: string) => void; onClose: () => void }) {
+  const [text, setText] = useState(seg.text)
+  const { status, schedule, flush } = useAutoSave(onSave)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const close = () => { flush(); onClose() }
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 360)}px` }
+  }, [text])
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [])
+  return <>
+    <div className="fixed inset-0 z-20" onMouseDown={close} />
+    <div className="absolute -inset-x-1 -top-1 z-30 rounded-lg border border-white/15 bg-[#16181a]/95 px-4 py-3 shadow-xl shadow-black/50 backdrop-blur">
+      <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => { setText(e.target.value); schedule(e.target.value) }} onBlur={flush} className="max-h-[360px] min-h-24 w-full resize-none bg-transparent text-[13px] leading-relaxed text-white/90 outline-none" />
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-2 text-xs">
+        <span className="text-white/40">自动保存 <SaveBadge status={status} /></span>
+        {shot && <span className="text-amber-300">修改后，镜头 {no2(shot.no)} 将标记为待更新</span>}
+        <button onClick={close} className="text-white/60 hover:text-white">收起</button>
+      </div>
+    </div>
+  </>
 }

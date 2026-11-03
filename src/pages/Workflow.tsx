@@ -14,7 +14,7 @@ export default function Workflow() {
 
   if (!project) return null
 
-  // 1/2/3 步一旦下游开始生成即只读（规则见 StepBar.stepLocked）
+  // 仅剧本在开始拆解后锁定
   const locked = stepLocked(project)
 
   return (
@@ -25,8 +25,8 @@ export default function Workflow() {
 
       <main className="mx-auto w-full max-w-[1680px] flex-1 px-6 py-4 lg:px-10 2xl:px-14">
         {step === 1 && <Step1Script project={project} locked={locked[0]} />}
-        {step === 2 && <Step2Segments project={project} locked={locked[1]} />}
-        {step === 3 && <Step3Assets project={project} locked={locked[2]} />}
+        {step === 2 && <Step2Segments project={project} />}
+        {step === 3 && <Step3Assets project={project} />}
         {step === 4 && <Step4Shots project={project} />}
         {step === 5 && <Step5Video project={project} />}
       </main>

@@ -5,7 +5,6 @@ import { useStore } from '@/store/workflowStore'
 import { no2, preferredVersion } from '@/utils/project'
 import videoPoster from '@/assets/placeholders/frame-5.jpg'
 
-const DURATION = 15
 const SPEEDS = [0.5, 1, 1.5, 2]
 
 export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: () => void }) {
@@ -24,6 +23,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
   const [tag, setTag] = useState(() => preferredVersion(shot.video)?.tag)
   const active = versions.find((v) => v.tag === tag) ?? versions[versions.length - 1]
   const url = active?.url
+  const DURATION = active?.dur ?? shot.dur
 
   useEffect(() => {
     const loop = (now: number) => {
@@ -35,7 +35,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
     last.current = performance.now()
     raf.current = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf.current!)
-  }, [playing, rate])
+  }, [playing, rate, DURATION])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

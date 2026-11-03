@@ -1,4 +1,5 @@
 import { Fragment, type CSSProperties } from 'react'
+import { outdatedShots, ungeneratedSegments } from '@/utils/project'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 
@@ -15,11 +16,10 @@ export function stepUnlocked(p: Project): boolean[] {
   ]
 }
 
-// 锁定规则：下一步一旦开始生成，本步即只读（第 N 步解锁 ⇔ 第 N-1 步上锁）
-// 第 4、5 步永不上锁：改镜头 → video.stale →「需重新生成」是这两步的核心价值
+// 仅剧本在开始拆解后锁定；后续编辑通过待更新机制传播。
 export function stepLocked(p: Project): boolean[] {
   const u = stepUnlocked(p)
-  return [u[1], u[2], u[3], false, false]
+  return [u[1], false, false, false, false]
 }
 
 export function stepDone(p: Project): boolean[] {
@@ -59,9 +59,20 @@ const FILL: Record<NodeState, string | undefined> = {
   todo: undefined,
 }
 
-export default function StepBar({ project }: { project: Project }) {
-  const step = useStore((s) => s.step)
-  const goStep = useStore((s) => s.goStep)
+/* step / onStep 缺省走全局 store；方案页传入受控值，避免写真实工作流状态 */
+export default function StepBar({
+  project,
+  step: stepProp,
+  onStep,
+}: {
+  project: Project
+  step?: number
+  onStep?: (n: number) => void
+}) {
+  const storeStep = useStore((s) => s.step)
+  const storeGoStep = useStore((s) => s.goStep)
+  const step = stepProp ?? storeStep
+  const goStep = onStep ?? storeGoStep
   const unlocked = stepUnlocked(project)
   const done = stepDone(project)
   const readonly = stepLocked(project)
@@ -75,18 +86,20 @@ export default function StepBar({ project }: { project: Project }) {
           const n = i + 1
           const st = stateOf(i)
           const notReached = !unlocked[i]
+          const hint = i === 2 && project.assetsHint ? '段落有修改，可重新提取' : i === 3 ? [outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : '', ungeneratedSegments(project).length ? `${ungeneratedSegments(project).length} 个段落尚未生成镜头` : ''].filter(Boolean).join('；') : ''
           return (
             <Fragment key={n}>
               <button
                 disabled={notReached}
                 onClick={() => !notReached && goStep(n)}
-                title={notReached ? '完成上一步后解锁' : readonly[i] ? '该步骤已用于后续生成，仅供查看' : ''}
+                title={notReached ? '完成上一步后解锁' : readonly[i] ? '该步骤已用于后续生成，仅供查看' : hint}
                 className={`flex w-[100px] shrink-0 flex-col items-center gap-[13px] bg-transparent ${
                   notReached ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
               >
                 {/* 菱形节点 */}
                 <div className="relative flex h-10 w-10 items-center justify-center">
+                  {hint && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-400 ring-[1.5px] ring-[#111213]" />}
                   {st === 'active' && <span className="om-ripple" />}
                   <span
                     className="flex h-[26px] w-[26px] rotate-45 items-center justify-center rounded-lg"
@@ -130,6 +143,7 @@ export default function StepBar({ project }: { project: Project }) {
                       style={{ background: FILL[st] }}
                     />
                   )}
+                  {hint && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-400 ring-[1.5px] ring-[#111213]" />}
                   {st === 'active' && (
                     <div
                       className="absolute inset-y-0 w-[44%]"

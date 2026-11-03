@@ -385,10 +385,21 @@ export function LockedBadge({ text = '该步骤已用于后续生成，仅供查
   )
 }
 
-/* ---------- 底部主操作栏（每个步骤自己渲染） ---------- */
-export function ActionBar({ left, children }: { left?: ReactNode; children: ReactNode }) {
+/* ---------- 底部主操作栏（每个步骤自己渲染） ----------
+   inline：贴在最近的 relative 容器底部而非视口底部，供方案页把整屏预览装进卡片里 */
+export function ActionBar({
+  left,
+  children,
+  inline = false,
+}: {
+  left?: ReactNode
+  children: ReactNode
+  inline?: boolean
+}) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-line/60 bg-ink/95 px-8 py-3 backdrop-blur">
+    <div
+      className={`${inline ? 'absolute' : 'fixed'} inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-line/60 bg-ink/95 px-8 py-3 backdrop-blur`}
+    >
       <div className="text-[13px] text-muted">{left}</div>
       <div className="flex items-center gap-3">{children}</div>
     </div>

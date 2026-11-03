@@ -1,10 +1,12 @@
+import DurationChip from '@/components/DurationChip'
+import NoticeBar from '@/components/NoticeBar'
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { COST } from '@/services/generation'
-import { no2, fmtDur } from '@/utils/project'
+import { COST, videoCost } from '@/services/generation'
+import { no2, fmtDur, outdatedShots, ungeneratedSegments, shotGenerationBlocked } from '@/utils/project'
 import { useAutoSave } from '@/hooks/useAutoSave'
 import {
   ActionBar,
@@ -21,11 +23,13 @@ import VideoConfirmModal from './VideoConfirmModal'
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
 
-function PillOutline({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
+function PillOutline({ children, onClick, disabled, title, amber }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; title?: string; amber?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+      disabled={disabled}
+      title={title}
+      className={`inline-flex h-10 items-center justify-center gap-2 rounded-full border px-5 text-sm font-medium transition-colors hover:bg-white/5 disabled:opacity-40 ${amber ? 'border-amber-400/40 text-amber-300' : 'border-white/20 text-white'}`}
     >
       {children}
     </button>
@@ -82,10 +86,10 @@ const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?
 // 默认可见列：画面与节奏 + 人物与空间（共 7 列）；「更多设定」默认隐藏，可在「字段」里开启
 const DEFAULT_VISIBLE_FIELDS = SHOT_GROUPS.slice(0, 2).flatMap((g) => g.fields)
 
-// 时间线展示：拆成固定三段（0–5 / 5–10 / 10–15 秒），不足补空行以稳定行高
+// 按实际时间槽展示；容器 min-height 保持稳定行高。
 function parseTimeline(raw: string): string[] {
   const lines = (raw ?? '').split('\n').map((l) => l.trim()).filter(Boolean)
-  return [0, 1, 2].map((i) => lines[i] ?? '')
+  return lines
 }
 
 // 模糊匹配：先看是否包含子串，再退化为顺序子序列匹配
@@ -127,6 +131,11 @@ function buildGridTemplate(cols: { key: keyof Shot }[]): string {
 
 export default function Step4Shots({ project }: { project: Project }) {
   const { generateShots, deleteShot, regenerateShot, startVideos } = useStore()
+  const pending = outdatedShots(project)
+  const missing = ungeneratedSegments(project)
+  const blocked = shotGenerationBlocked(project)
+  const [initialSelection, setInitialSelection] = useState<number[] | undefined>()
+  const openGeneration = (segNos?: number[]) => { setInitialSelection(segNos); setGenOpen(true) }
   const st = project.shotStatus
   const shots = project.shots
 
@@ -194,7 +203,7 @@ export default function Step4Shots({ project }: { project: Project }) {
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
-  if (st === 'generating') {
+  if (st === 'generating' && shots.length === 0) {
     return (
       <>
         <GeneratingState
@@ -215,10 +224,15 @@ export default function Step4Shots({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="镜头设计"
-        desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.length * 15} 秒。`}
-        right={<PillOutline onClick={() => setGenOpen(true)}>重新生成镜头</PillOutline>}
+        desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.reduce((n, s) => n + s.dur, 0)} 秒`}
+        right={<>
+          {pending.length > 0 && <PillOutline amber disabled={!!blocked} title={blocked} onClick={() => openGeneration(project.segments.filter((seg) => pending.some((s) => s.segId === seg.id)).map((s) => s.no))}>更新 {pending.length} 个待更新镜头</PillOutline>}
+          <PillOutline disabled={!!blocked} title={blocked} onClick={() => openGeneration()}>重新生成镜头</PillOutline>
+        </>}
       />
 
+      {missing.length > 0 && <NoticeBar tone="neutral" action="去生成" disabled={!!blocked} title={blocked} onAction={() => openGeneration(missing.map((s) => s.no))}>{missing.length === 1 ? `段落 ${no2(missing[0].no)} 尚未生成镜头` : `${missing.length} 个段落尚未生成镜头`}</NoticeBar>}
+      {st === 'generating' && <NoticeBar tone="neutral">正在生成镜头，完成后可操作</NoticeBar>}
       {/* 工具条：字段 / 筛选 + 已加条件 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {/* 字段：选中/展开时整枚标签高亮（青色描边+底+图标徽章） */}
@@ -359,6 +373,7 @@ export default function Step4Shots({ project }: { project: Project }) {
             <div>
               {shownShots.map((s) => (
                 <ShotRow
+                  project={project}
                   key={s.id}
                   shot={s}
                   cols={cols}
@@ -385,7 +400,7 @@ export default function Step4Shots({ project }: { project: Project }) {
           {sel.length ? (
             <>
               <span className="text-[12px] leading-none">✦</span>
-              {fmt(sel.length * COST.videoEach)} {sel.length === shots.length ? '生成全部' : '生成'} {sel.length} 段视频
+              {fmt(shots.filter((s) => sel.includes(s.id)).reduce((n, s) => n + videoCost(s.dur), 0))} {sel.length === shots.length ? '生成全部' : '生成'} {sel.length} 段视频
             </>
           ) : (
             '请至少选择一个镜头'
@@ -402,6 +417,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {genOpen && (
         <GenShotModal
           project={project}
+          initialSelection={initialSelection}
           onClose={() => setGenOpen(false)}
           onConfirm={(segNos) => {
             setGenOpen(false)
@@ -414,7 +430,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { setDetailId(menu.s.id); setMenu(null) }}>编辑镜头详情</MenuItem>
-          <MenuItem onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该分镜</MenuItem>
+          <div title={blocked}><MenuItem disabled={!!blocked} onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该分镜</MenuItem></div>
           <MenuItem onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
           <MenuItem danger onClick={() => { deleteShot(menu.s.id); setMenu(null) }}>
             删除镜头
@@ -494,7 +510,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {/* 确认生成视频 → 先置 generating，再切到第五步 */}
       {videoConfirm && (
         <VideoConfirmModal
-          count={videoConfirm.length}
+          shots={shots.filter((s) => videoConfirm.includes(s.id))}
           balance={project.balance}
           onClose={() => setVideoConfirm(null)}
           onConfirm={() => {
@@ -510,6 +526,7 @@ export default function Step4Shots({ project }: { project: Project }) {
 
 /* ---------- 表格行：选择 / 镜头 / 画面 / 时间线 / 操作 ---------- */
 function ShotRow({
+  project,
   shot,
   cols,
   gridTemplate,
@@ -521,6 +538,7 @@ function ShotRow({
   onCommit,
   onMenu,
 }: {
+  project: Project
   shot: Shot
   cols: { key: keyof Shot; label: string }[]
   gridTemplate: string
@@ -533,6 +551,7 @@ function ShotRow({
   onMenu: (e: React.MouseEvent) => void
 }) {
   const vi = videoStateInfo(shot.video)
+  const seg = project.segments.find((s) => s.id === shot.segId)
 
   return (
     <div
@@ -550,11 +569,13 @@ function ShotRow({
       {/* 镜头信息 */}
       <div className="flex flex-col justify-center gap-1 border-r border-white/[0.06] px-3 py-3">
         <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
-        <span className="text-[12px] text-faint">{fmtDur('15s')}</span>
+        <DurationChip title="镜头时长" value={seg?.dur ?? shot.dur} disabled={project.shotStatus === 'generating' || !seg} onSave={(dur) => seg && useStore.getState().updateSegment(seg.id, { dur })} />
+        {seg && seg.dur !== shot.dur && <span className="text-[11px] text-faint">描述按 {shot.dur} 秒编写</span>}
         <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
           {vi.text}
         </span>
+        {!!shot.outdated?.length && <OutdatedChip shot={shot} project={project} />}
         {!selected && <span className="text-[12px] text-faint">不生成</span>}
       </div>
 
@@ -566,7 +587,7 @@ function ShotRow({
           onCommit={(v) => onCommit({ [c.key]: v } as Partial<Shot>)}
           readView={
             c.key === 'timeline' ? (
-              <div className="space-y-1">
+              <div className="min-h-[60px] space-y-1">
                 {parseTimeline(shot.timeline).map((line, i) => (
                   <div key={i} className="line-clamp-1 text-white/80">
                     {line || ' '}
@@ -735,7 +756,7 @@ function FilterPreview({
                   <span className="rounded bg-brand px-1.5 py-1 text-[10.5px] font-semibold leading-none tabular-nums text-black">
                     {no2(s.no)}
                   </span>
-                  <span className="text-[11.5px] text-white/40">{fmtDur('15s')}</span>
+                  <span className="text-[11.5px] text-white/40">{fmtDur(s.dur)}</span>
                 </div>
                 <div className="mt-2 line-clamp-2 text-[12.5px] leading-relaxed text-white/[0.62]">
                   {snippet ? highlightText(snippet, terms) : '（该字段为空）'}
@@ -821,7 +842,7 @@ function InlineCellEditor({
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.preventDefault()
-                  setEditing(false)
+                  close()
                 }
               }}
               className="w-full resize-none bg-transparent px-4 py-3 text-[13.5px] leading-relaxed text-white/90 outline-none placeholder:text-faint"
@@ -931,4 +952,29 @@ function snapshot(s: Shot): Record<string, string> {
   const o: Record<string, string> = {}
   SHOT_FIELDS.forEach((f) => (o[f.key] = String(s[f.key] ?? '')))
   return o
+}
+
+
+function OutdatedChip({ shot, project }: { shot: Shot; project: Project }) {
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
+  const blocked = shotGenerationBlocked(project)
+  const hasDur = shot.outdated?.some((r) => r.kind === 'segDur')
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setAnchor(null) }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [])
+  return <>
+    <button className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300" title={shot.outdated?.map((r) => `· ${r.text}`).join('\n')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAnchor({ top: Math.min(r.bottom + 6, window.innerHeight - 310), left: r.left }) }}><AlertTriangle size={12} />待更新</button>
+    {anchor && <Popover anchor={anchor} width={300} onClose={() => setAnchor(null)}><div className="space-y-3 p-4">
+      <h3 className="text-sm font-medium">镜头 {no2(shot.no)} 需要更新</h3>
+      <div className="space-y-1 text-xs text-amber-300">{shot.outdated?.map((r) => <p key={`${r.kind}:${r.key ?? ''}`}>· {r.text}</p>)}</div>
+      <p className="text-xs leading-relaxed text-faint">重新生成会按最新内容改写这个镜头的描述；如果这次修改不影响画面（比如改了错别字），可以保留当前描述。</p>
+      {hasDur && <p className="text-xs text-amber-300">保留当前描述会把时长恢复为 {shot.dur} 秒</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button disabled={!!blocked} title={blocked} className="rounded-full bg-brand px-3 py-2 text-xs text-black disabled:opacity-40" onClick={() => { useStore.getState().regenerateShot(shot.id); setAnchor(null) }}>✦50 重新生成该分镜</button>
+        <button className="rounded-full border border-white/20 px-3 py-2 text-xs" onClick={() => { useStore.getState().dismissOutdated(shot.id); setAnchor(null) }}>保留当前描述</button>
+      </div>
+    </div></Popover>}
+  </>
 }

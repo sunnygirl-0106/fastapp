@@ -1,5 +1,10 @@
-import { useState, type ReactNode } from 'react'
-import { Copy, Eraser, Eye, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import NoticeBar from '@/components/NoticeBar'
+import AssetLayout from '@/components/AssetLayout'
+import { assetPromptPlaceholder } from '@/data/assetTemplates'
+import { renameOccurrences, shotsReferencingAsset, shotGenerationBlocked } from '@/utils/project'
+import { useRef, useState, type ReactNode } from 'react'
+import { Eraser, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -9,7 +14,7 @@ import {
   Diamond,
   GenerateConfirmModal,
   GeneratingState,
-  LockedBadge,
+  Modal,
   ModelSelect,
   Overlay,
   PageHeader,
@@ -38,11 +43,12 @@ function PillCTA({ children, onClick, disabled }: { children: ReactNode; onClick
   )
 }
 
-function PillOutline({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
+function PillOutline({ children, onClick, disabled, title }: { children: ReactNode; onClick?: () => void; disabled?: boolean; title?: string }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5 disabled:opacity-40"
     >
       {children}
@@ -50,9 +56,14 @@ function PillOutline({ children, onClick, disabled }: { children: ReactNode; onC
   )
 }
 
-export default function Step3Assets({ project, locked }: { project: Project; locked: boolean }) {
+export default function Step3Assets({ project }: { project: Project }) {
   const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots, goStep } =
     useStore()
+  const blocked = shotGenerationBlocked(project)
+  const imagesGenerating = project.assets.some((a) => a.imgState === 'generating')
+  const uploadRef = useRef<HTMLInputElement>(null)
+  const uploadId = useRef<string | null>(null)
+  const [deleteFor, setDeleteFor] = useState<Asset | null>(null)
   const st = project.assetStatus
   const chars = project.assets.filter((a) => a.kind === 'char')
   const scenes = project.assets.filter((a) => a.kind === 'scene')
@@ -91,7 +102,6 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
         <AssetCard
           key={a.id}
           a={a}
-          locked={locked}
           onZoom={() => setLightbox(a)}
           onMenu={(e) => openMenu(a, e)}
           onGen={() => setGenFor(a)}
@@ -107,14 +117,22 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       <PageHeader
         title="角色与场景"
         desc="完善角色与场景的设定和参考图，可以让后续画面更加一致。"
-        badge={locked && <LockedBadge />}
         right={
-          <PillOutline disabled={locked} onClick={() => setReextract(true)}>
+          <PillOutline disabled={!!blocked} title={blocked} onClick={() => setReextract(true)}>
             重新提取
           </PillOutline>
         }
       />
 
+      {project.assetsHint && <NoticeBar action="重新提取" disabled={!!blocked} title={blocked} onAction={() => setReextract(true)}>段落内容有修改，如出现了新的角色或场景，可以重新提取。</NoticeBar>}
+      <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+        const file = e.target.files?.[0]; const id = uploadId.current
+        e.target.value = ''
+        if (!file || !id) return
+        const reader = new FileReader()
+        reader.onload = () => updateAsset(id, { imageUrl: String(reader.result), imgState: 'done' })
+        reader.readAsDataURL(file)
+      }} />
       <Section title="角色" count={chars.length}>
         <div className={gridCls}>{renderCards(chars, '暂无角色')}</div>
       </Section>
@@ -122,39 +140,26 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
         <div className={gridCls}>{renderCards(scenes, '暂无场景')}</div>
       </Section>
 
-      {/* 底部主操作栏：锁定后只留导航，未锁定时区分「补全参考图」与「生成镜头」 */}
-      {locked ? (
-        <ActionBar left="该步骤已锁定，内容仅供查看">
-          <PillCTA onClick={() => goStep(4)}>下一步：镜头设计</PillCTA>
-        </ActionBar>
-      ) : missing.length > 0 ? (
-        <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
-          <PillCTA onClick={() => setBatchOpen(true)}>
-            <span className="text-[12px] leading-none">✦</span>
-            {fmt(missing.length * COST.assetImgEach)} 生成全部参考图
-          </PillCTA>
-        </ActionBar>
-      ) : (
-        <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
-          <PillCTA onClick={() => setShotOpen(true)}>
-            <span className="text-[12px] leading-none">✦</span>
-            {fmt(project.segments.length * COST.shotGenEach)} 生成镜头设计
-          </PillCTA>
-        </ActionBar>
-      )}
+      <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
+        {imagesGenerating ? <PillCTA disabled>正在生成参考图…</PillCTA> : missing.length > 0 ? <>
+          <PillCTA onClick={() => setBatchOpen(true)}>✦{fmt(missing.length * COST.assetImgEach)} 生成全部参考图</PillCTA>
+          {project.shots.length > 0 && <PillOutline onClick={() => goStep(4)}>下一步：镜头设计</PillOutline>}
+        </> : project.shots.length > 0 ? <PillCTA onClick={() => goStep(4)}>下一步：镜头设计</PillCTA> :
+          <span title={blocked}><PillCTA disabled={!!blocked} onClick={() => setShotOpen(true)}>✦{fmt(project.segments.length * COST.shotGenEach)} 生成镜头设计</PillCTA></span>}
+      </ActionBar>
 
       {/* 重新提取确认 */}
-      {!locked && reextract && (
+      {reextract && (
         <GenerateConfirmModal
           title="确认重新提取角色与场景"
-          what="重新提取将重建角色与场景列表；已生成的参考图会尽量保留，下游镜头和视频会被标记为需要重新生成。"
+          what="重新提取将重建角色与场景列表，同名角色和场景会保留已生成的参考图；已生成的镜头会标记为待更新。"
+          disabled={!!blocked}
           model={MODELS.text}
           cost={COST.assetExtract}
           balance={project.balance}
           confirmText="确认并重新提取"
           onClose={() => setReextract(false)}
           onConfirm={() => {
-            if (locked) return
             setReextract(false)
             extractAssets()
           }}
@@ -162,13 +167,13 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {/* 批量生成参考图 */}
-      {!locked && batchOpen && (
+      {batchOpen && (
         <BatchModal
+          projectRatio={project.config.ratio.split(' ')[0]}
           assets={missing}
           balance={project.balance}
           onClose={() => setBatchOpen(false)}
           onGen={async (ids, edits) => {
-            if (locked) return
             Object.entries(edits).forEach(([id, prompt]) => updateAsset(id, { prompt }))
             setBatchOpen(false)
             await generateAssetImages(ids)
@@ -177,13 +182,13 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {/* 单张生成参考图 */}
-      {!locked && genFor && (
+      {genFor && (
         <GenAssetImageModal
+          projectRatio={project.config.ratio.split(' ')[0]}
           a={genFor}
           balance={project.balance}
           onClose={() => setGenFor(null)}
           onConfirm={async (patch) => {
-            if (locked) return
             const id = genFor.id
             if (patch.prompt !== genFor.prompt) updateAsset(id, { prompt: patch.prompt })
             setGenFor(null)
@@ -192,30 +197,36 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
         />
       )}
 
-      {/* 设定：锁定时只读查看 */}
+      {/* 设定编辑与名称同步替换 */}
       {editFor &&
         (() => {
           const a = project.assets.find((x) => x.id === editFor)
           if (!a) return null
           return (
-            <AssetSettingModal
+            <EditableAssetSettingModal
               a={a}
-              readOnly={locked}
+              project={project}
               onClose={() => setEditFor(null)}
-              onSave={(patch) => { if (!locked) updateAsset(a.id, patch) }}
+              onSave={(patch) => updateAsset(a.id, patch)}
             />
           )
         })()}
 
+      {deleteFor && <Modal title={`删除${deleteFor.kind === 'char' ? '角色' : '场景'}`} width={480} onClose={() => setDeleteFor(null)} footer={<><Button onClick={() => setDeleteFor(null)}>取消</Button><Button variant="danger-solid" onClick={() => { deleteAsset(deleteFor.id); setDeleteFor(null) }}>删除{deleteFor.kind === 'char' ? '角色' : '场景'}</Button></>}>
+        <p className="text-sm leading-relaxed text-white/80">{(() => {
+          const n = shotsReferencingAsset(project, deleteFor).length
+          return n ? `「${deleteFor.name}」被 ${n} 个镜头引用。删除后，这些镜头生成视频时不再参考该${deleteFor.kind === 'char' ? '角色' : '场景'}图，并会标记为待更新。` : `确定删除「${deleteFor.name}」吗？`
+        })()}</p>
+      </Modal>}
+
       {lightbox && <Lightbox title={lightbox.name} url={lightbox.imageUrl} onClose={() => setLightbox(null)} />}
 
       {/* 生成镜头设计弹窗（与 Step4 共用） */}
-      {!locked && shotOpen && (
+      {shotOpen && (
         <GenShotModal
           project={project}
           onClose={() => setShotOpen(false)}
           onConfirm={(segNos) => {
-            if (locked) return
             setShotOpen(false)
             startShots(segNos)
           }}
@@ -223,31 +234,26 @@ export default function Step3Assets({ project, locked }: { project: Project; loc
       )}
 
       {menu && (
-        <Popover anchor={menu} width={locked ? 220 : 168} variant="glass" onClose={() => setMenu(null)}>
-          <MenuRow icon={<Image size={16} />} disabled={locked} onClick={() => { useStore.getState().showToast('请选择本地图片（示意）'); setMenu(null) }}>
+        <Popover anchor={menu} width={168} variant="glass" onClose={() => setMenu(null)}>
+          <MenuRow icon={<Image size={16} />} onClick={() => { uploadId.current = menu.a.id; uploadRef.current?.click(); setMenu(null) }}>
             选择本地图片
           </MenuRow>
-          <MenuRow icon={<Sparkles size={16} />} disabled={locked} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
+          <MenuRow icon={<Sparkles size={16} />} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
             {menu.a.imgState === 'done' ? 'AI 重新生成图片' : 'AI 生成图片'}
           </MenuRow>
-          <MenuRow icon={locked ? <Eye size={16} /> : <Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
-            {locked ? '查看' : '编辑'}{menu.a.kind === 'char' ? '角色' : '场景'}设定
+          <MenuRow icon={<Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
+            编辑{menu.a.kind === 'char' ? '角色' : '场景'}设定
           </MenuRow>
           <MenuRow
             icon={<Eraser size={16} />}
-            disabled={locked || menu.a.imgState !== 'done'}
+            disabled={menu.a.imgState !== 'done'}
             onClick={() => { clearAssetImage(menu.a.id); setMenu(null) }}
           >
             清除参考图
           </MenuRow>
-          <MenuRow icon={<Trash2 size={16} />} disabled={locked} onClick={() => { deleteAsset(menu.a.id); setMenu(null) }}>
+          <MenuRow icon={<Trash2 size={16} />} onClick={() => { setDeleteFor(menu.a); setMenu(null) }}>
             删除{menu.a.kind === 'char' ? '角色' : '场景'}
           </MenuRow>
-          {locked && (
-            <div className="border-t border-white/10 pt-4 text-[12px] leading-[18px] text-white/40">
-              该步骤已锁定，仅可查看设定
-            </div>
-          )}
         </Popover>
       )}
     </div>
@@ -298,13 +304,11 @@ function Section({ title, count, children }: { title: string; count: number; chi
 
 function AssetCard({
   a,
-  locked,
   onZoom,
   onMenu,
   onGen,
 }: {
   a: Asset
-  locked: boolean
   onZoom: () => void
   onMenu: (e: React.MouseEvent) => void
   onGen: () => void
@@ -312,17 +316,8 @@ function AssetCard({
   const done = a.imgState === 'done'
   const generating = a.imgState === 'generating'
   const kindCn = a.kind === 'char' ? '角色' : '场景'
-  // 锁定且无图时不说「待生成」——那暗示一个此时做不到的动作
-  const subtitle = generating
-    ? '正在生成参考图…'
-    : done
-      ? kindCn
-      : locked
-        ? '未生成参考图'
-        : '待生成参考图'
-
-  // 锁定后只剩「有图可放大」，无图则完全无响应
-  const inert = generating || (locked && !done)
+  const subtitle = generating ? '正在生成参考图…' : done ? kindCn : '待生成参考图'
+  const inert = generating
   const onCoverClick = () => {
     if (inert) return
     if (done) onZoom()
@@ -340,7 +335,7 @@ function AssetCard({
         }`}
       >
         <div
-          className="absolute inset-0 bg-cover bg-center"
+          className={`absolute inset-0 bg-center bg-no-repeat ${a.kind === 'char' ? 'bg-contain bg-black/30' : 'bg-cover'}`}
           style={{ backgroundImage: `url("${done && a.imageUrl ? a.imageUrl : defaultCover}")` }}
         />
         {generating && (
@@ -360,7 +355,7 @@ function AssetCard({
         </div>
         {!generating && (
           <button
-            title={locked ? '查看设定' : '更多操作'}
+            title="更多操作"
             aria-label="更多操作"
             className="-mr-1 shrink-0 rounded-md p-1 text-white/50 transition-colors hover:bg-white/5 hover:text-white"
             onClick={(e) => {
@@ -396,6 +391,7 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
 
 /* 单张参考图生成弹窗（对齐 Figma node 6:3453）：可编辑提示词 + 模型/比例/分辨率 + 消耗 */
 function GenAssetImageModal({
+  projectRatio,
   a,
   balance,
   onClose,
@@ -403,13 +399,14 @@ function GenAssetImageModal({
 }: {
   a: Asset
   balance: number
+  projectRatio: string
   onClose: () => void
   onConfirm: (patch: { prompt: string }) => void
 }) {
   const kindCn = a.kind === 'char' ? '角色' : '场景'
   const [prompt, setPrompt] = useState(a.prompt)
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('1:1')
+  const [ratio, setRatio] = useState(a.kind === 'char' ? '16:9' : projectRatio)
   const [res, setRes] = useState('1K')
   const cost = COST.assetImgEach
   const ok = prompt.trim().length > 0
@@ -427,11 +424,13 @@ function GenAssetImageModal({
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
+          <AssetLayout kind={a.kind} />
+          <div className="text-sm text-white/60">参考图描述（外观）</div>
           <textarea
             rows={6}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
+            placeholder={assetPromptPlaceholder(a.kind)}
             className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
           />
 
@@ -463,6 +462,7 @@ function GenAssetImageModal({
 }
 
 function BatchModal({
+  projectRatio,
   assets,
   balance,
   onClose,
@@ -470,6 +470,7 @@ function BatchModal({
 }: {
   assets: Asset[]
   balance: number
+  projectRatio: string
   onClose: () => void
   onGen: (ids: string[], edits: Record<string, string>) => void
 }) {
@@ -478,7 +479,7 @@ function BatchModal({
     Object.fromEntries(assets.map((a) => [a.id, a.prompt])),
   )
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('1:1')
+  const [ratios, setRatios] = useState<Record<string, string>>(Object.fromEntries(assets.map((a) => [a.id, a.kind === 'char' ? '16:9' : projectRatio])))
   const [res, setRes] = useState('1K')
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -523,11 +524,13 @@ function BatchModal({
                     {kindCn}
                   </span>
                 </label>
+                <AssetLayout kind={a.kind} />
+                <div className="flex items-center justify-between text-sm text-white/60"><span>参考图描述（外观）</span><div className="flex items-center gap-2">画面比例 <ModelSelect value={ratios[a.id]} options={['1:1', '9:16', '16:9', '4:3', '3:4']} onChange={(ratio) => setRatios((r) => ({ ...r, [a.id]: ratio }))} variant="pill" width={84} /></div></div>
                 <textarea
                   rows={4}
                   value={prompts[a.id] ?? ''}
                   onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
-                  placeholder={`描述「${a.name}」的外观与画面风格`}
+                  placeholder={assetPromptPlaceholder(a.kind)}
                   className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
                 />
               </div>
@@ -571,16 +574,6 @@ function BatchModal({
         <div className="flex shrink-0 flex-wrap items-center gap-4 px-5 py-3">
           <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} variant="pill" width={148} />
           <div className="flex items-center gap-3">
-            <span className="text-sm text-white">画面比例</span>
-            <ModelSelect
-              value={ratio}
-              options={['1:1', '9:16', '16:9', '4:3', '3:4']}
-              onChange={setRatio}
-              variant="pill"
-              width={84}
-            />
-          </div>
-          <div className="flex items-center gap-3">
             <span className="text-sm text-white">分辨率</span>
             <ResChips value={res} onChange={setRes} />
           </div>
@@ -601,80 +594,28 @@ function BatchModal({
   )
 }
 
-/* 锁定时只读查看，不挂载编辑表单或初始化编辑状态。 */
-function AssetSettingModal({
-  a,
-  readOnly = false,
-  onClose,
-  onSave,
-}: {
-  a: Asset
-  readOnly?: boolean
-  onClose: () => void
-  onSave: (patch: Partial<Asset>) => void
-}) {
-  if (!readOnly) return <EditableAssetSettingModal a={a} onClose={onClose} onSave={onSave} />
-
-  const kindCn = a.kind === 'char' ? '角色' : '场景'
-  const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(a.prompt)
-      useStore.getState().showToast('已复制参考图描述')
-    } catch {
-      useStore.getState().showToast('复制失败，请手动选择文本')
-    }
-  }
-
-  return (
-    <Overlay onClose={onClose}>
-      <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
-          <div className="text-base font-medium text-white">查看{kindCn}设定</div>
-          <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
-          </button>
-        </div>
-
-        <div className="table-scroll flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
-          <div className="flex flex-col gap-2">
-            <div className="text-[12px] leading-[18px] text-white/40">{kindCn}名称</div>
-            <div className="whitespace-pre-line text-[16px] font-medium leading-5 text-white">{a.name || '—'}</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="text-[12px] leading-[18px] text-white/40">{kindCn}描述</div>
-            <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">{a.desc || '—'}</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="text-[12px] leading-[18px] text-white/40">参考图描述</div>
-              {a.prompt && (
-                <button className="inline-flex items-center gap-1 text-[12px] text-white/50 hover:text-white" onClick={copyPrompt}>
-                  <Copy size={12} />
-                  复制
-                </button>
-              )}
-            </div>
-            <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">{a.prompt || '—'}</div>
-            <div className="text-[12px] leading-[18px] text-white/40">用于生成{kindCn}参考图</div>
-          </div>
-        </div>
-      </div>
-    </Overlay>
-  )
-}
-
-/* 居中设定弹窗（对齐 Figma node 6:3861）：名称只读展示，描述与参考图描述可编辑，点「保存」提交 */
 function EditableAssetSettingModal({
+  project,
   a,
   onClose,
   onSave,
 }: {
   a: Asset
+  project: Project
   onClose: () => void
   onSave: (patch: Partial<Asset>) => void
 }) {
   const isChar = a.kind === 'char'
   const kindCn = isChar ? '角色' : '场景'
+  const [name, setName] = useState(a.name)
+  const [syncOpen, setSyncOpen] = useState(false)
+  const duplicate = project.assets.some((x) => x.id !== a.id && x.kind === a.kind && x.name === name.trim())
+  const occurrences = renameOccurrences(project, a.name)
+  const save = (sync: boolean) => {
+    onSave({ desc, prompt })
+    if (name.trim() !== a.name) useStore.getState().renameAsset(a.id, name, sync)
+    onClose()
+  }
   const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
 
@@ -682,7 +623,7 @@ function EditableAssetSettingModal({
     'w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={syncOpen ? () => setSyncOpen(false) : onClose}>
       <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
@@ -694,10 +635,12 @@ function EditableAssetSettingModal({
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
-          {/* 名称（只读展示） */}
+          {/* 名称与同类型重名校验 */}
           <div className="flex flex-col gap-2">
             <div className="text-[14px] text-white/60">{kindCn}名称</div>
-            <div className="text-[16px] font-medium text-white">{a.name}</div>
+            <input aria-label={`${kindCn}名称`} className={boxCls} value={name} onChange={(e) => setName(e.target.value)} />
+            {duplicate && <p className="text-xs text-red-400">已存在同名{kindCn}</p>}
+            {!name.trim() && <p className="text-xs text-red-400">名称不能为空</p>}
           </div>
 
           {/* 描述 */}
@@ -714,12 +657,13 @@ function EditableAssetSettingModal({
 
           {/* 参考图描述 */}
           <div className="flex flex-col gap-3">
-            <div className="text-[14px] text-white/60">参考图描述</div>
+            <AssetLayout kind={a.kind} />
+            <div className="text-[14px] text-white/60">参考图描述（外观）</div>
             <textarea
               rows={6}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={`描述「${a.name}」的外观与画面风格`}
+              placeholder={assetPromptPlaceholder(a.kind)}
               className={boxCls}
             />
             <div className="text-[14px] text-white/40">用于生成{kindCn}参考图</div>
@@ -730,15 +674,31 @@ function EditableAssetSettingModal({
         <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
           <PillOutline onClick={onClose}>取消</PillOutline>
           <PillCTA
+            disabled={!name.trim() || duplicate}
             onClick={() => {
-              onSave({ desc, prompt })
-              onClose()
+              if (name.trim() !== a.name && occurrences.length) setSyncOpen(true)
+              else save(false)
             }}
           >
             保存
           </PillCTA>
         </div>
+        {syncOpen && <SyncRenameModal oldName={a.name} newName={name.trim()} occurrences={occurrences} onClose={() => setSyncOpen(false)} onSave={save} />}
       </div>
     </Overlay>
   )
+}
+
+
+function SyncRenameModal({ oldName, newName, occurrences, onClose, onSave }: {
+  oldName: string; newName: string; occurrences: ReturnType<typeof renameOccurrences>; onClose: () => void; onSave: (sync: boolean) => void
+}) {
+  return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onMouseDown={(e) => { e.stopPropagation(); onClose() }}>
+    <div className="w-[640px] max-w-[92vw] rounded-xl border border-white/5 bg-[#1c1e20] p-5 shadow-2xl backdrop-blur" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between"><h2 className="text-base font-medium">同步替换分镜文本？</h2><button aria-label="返回编辑" onClick={onClose}><X size={14} /></button></div>
+      <p className="my-3 text-sm text-white/60">检测到 {occurrences.length} 处文本包含旧名称「{oldName}」</p>
+      <div className="max-h-[360px] space-y-2 overflow-auto">{occurrences.map((hit, i) => <div key={i} className="rounded-lg bg-black/30 p-3"><div className="mb-2 text-xs text-faint">{hit.source}</div><p className="text-sm text-white/80">{hit.before}<span className="text-red-400 line-through">{oldName}</span><span className="text-brand">{newName}</span>{hit.after}</p></div>)}</div>
+      <div className="mt-5 flex justify-end gap-2"><PillOutline onClick={() => onSave(false)}>仅修改名称</PillOutline><PillCTA onClick={() => onSave(true)}>同步替换并保存</PillCTA></div>
+    </div>
+  </div>, document.body)
 }
