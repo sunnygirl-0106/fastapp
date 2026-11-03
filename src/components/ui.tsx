@@ -202,7 +202,9 @@ export function ModelSelect({
   onChange,
   width = 168,
   variant = 'default',
+  disabledOptions = {},
 }: {
+  disabledOptions?: Record<string, string>
   value: string
   options: readonly string[]
   onChange: (v: string) => void
@@ -240,12 +242,15 @@ export function ModelSelect({
           {options.map((o) => (
             <button
               key={o}
+              disabled={!!disabledOptions[o]}
+              title={disabledOptions[o]}
               type="button"
               onClick={() => {
+                if (disabledOptions[o]) return
                 onChange(o)
                 setOpen(false)
               }}
-              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-line ${
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] enabled:hover:bg-line disabled:opacity-40 disabled:cursor-not-allowed ${
                 o === value ? 'text-brand' : 'text-white/90'
               }`}
             >

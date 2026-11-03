@@ -3,9 +3,6 @@ import { Plus, Trash2, X } from 'lucide-react'
 import type { Project, Segment, Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
-import DurationChip, { DurationStepper } from '@/components/DurationChip'
-import { useAutoSave } from '@/hooks/useAutoSave'
-import { SaveBadge } from '@/components/ui'
 import { no2 } from '@/utils/project'
 import {
   ActionBar,
@@ -97,7 +94,7 @@ export default function Step2Segments({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="剧本拆解"
-        desc={`共 ${segs.length} 个剧本段落 · 预计总时长 ${segs.reduce((n, s) => n + s.dur, 0)} 秒`}
+        desc={`共 ${segs.length} 个剧本段落 · ${project.config.durMode === 'manual' ? `目标成片 ${project.config.targetDur} 秒，各镜头时长在镜头设计时分配` : '各镜头时长在镜头设计时按内容确定'}`}
         right={
           <>
             <PillPrimary onClick={() => setAddOpen(true)}>
@@ -113,8 +110,7 @@ export default function Step2Segments({ project }: { project: Project }) {
             key={s.id}
             seg={s}
             shot={project.shots.find((shot) => shot.segId === s.id)}
-            generating={project.shotStatus === 'generating'}
-            onUpdate={(patch) => updateSegment(s.id, patch)}
+            onUpdate={(patch, options) => updateSegment(s.id, patch, options)}
             onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
             onDelete={() => setConfirmDel(s)}
           />
@@ -135,7 +131,7 @@ export default function Step2Segments({ project }: { project: Project }) {
       />
 
       {/* 新增剧本段落弹窗 */}
-      {addOpen && <AddSegModal defaultDur={project.config.segDur} nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
+      {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
 
       {/* 删除确认 */}
       {confirmDel && (
@@ -233,15 +229,13 @@ function BottomBar({
 function ParagraphCard({
   seg,
   shot,
-  generating,
   onUpdate,
   onRenameTitle,
   onDelete,
 }: {
   seg: Segment
   shot?: Shot
-  generating: boolean
-  onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>) => void
+  onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>, options?: { silent?: boolean }) => void
   onRenameTitle: (v: string) => void
   onDelete: () => void
 }) {
@@ -280,7 +274,6 @@ function ParagraphCard({
             {seg.title}
           </button>
         )}
-        <DurationChip value={seg.dur} title="段落时长" disabled={generating} onSave={(dur) => onUpdate({ dur })} />
         {!!shot?.outdated?.length && <span className="text-xs text-amber-300">镜头待更新</span>}
         <button
           type="button"
@@ -314,7 +307,7 @@ function ParagraphCard({
         </button>
 
         {/* 展开态：自动保存编辑浮层 */}
-        {open && <SegmentTextEditor seg={seg} shot={shot} onSave={(text) => onUpdate({ text })} onClose={() => setOpen(false)} />}
+        {open && <SegmentTextEditor seg={seg} shot={shot} onSave={(text, silent) => onUpdate({ text }, { silent })} onClose={() => setOpen(false)} />}
 
       </div>
     </div>
@@ -322,17 +315,14 @@ function ParagraphCard({
 }
 
 function AddSegModal({
-  defaultDur,
   nextNo,
   onClose,
   onAdd,
 }: {
-  defaultDur: number
   nextNo: number
   onClose: () => void
-  onAdd: (title: string, text: string, dur: number) => void
+  onAdd: (title: string, text: string) => void
 }) {
-  const [dur, setDur] = useState(defaultDur)
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const ok = title.trim() && text.trim()
@@ -366,7 +356,6 @@ function AddSegModal({
               className={boxCls}
             />
           </div>
-          <DurationStepper value={dur} onChange={setDur} />
           <div className="flex flex-col gap-2">
             <div className="text-[14px] text-white/60">剧本原文</div>
             <textarea
@@ -382,7 +371,7 @@ function AddSegModal({
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
           <PillOutline onClick={onClose}>取消</PillOutline>
-          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text, dur); onClose() }}>
+          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text); onClose() }}>
             添加
           </PillPrimary>
         </div>
@@ -392,9 +381,18 @@ function AddSegModal({
 }
 
 
-function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?: Shot; onSave: (text: string) => void; onClose: () => void }) {
+function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?: Shot; onSave: (text: string, silent: boolean) => void; onClose: () => void }) {
   const [text, setText] = useState(seg.text)
-  const { status, schedule, flush } = useAutoSave(onSave)
+  const [silent, setSilent] = useState(false)
+  // Keep this edit together until closing so the checkbox also covers text typed before it was checked.
+  const pending = useRef({ text, silent, onSave })
+  pending.current = { text, silent, onSave }
+  const saved = useRef(seg.text)
+  const flush = () => {
+    const latest = pending.current
+    if (latest.text !== saved.current) { latest.onSave(latest.text, latest.silent); saved.current = latest.text }
+  }
+  useEffect(() => () => flush(), [])
   const ref = useRef<HTMLTextAreaElement>(null)
   const close = () => { flush(); onClose() }
   useLayoutEffect(() => {
@@ -409,10 +407,10 @@ function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?
   return <>
     <div className="fixed inset-0 z-20" onMouseDown={close} />
     <div className="absolute -inset-x-1 -top-1 z-30 rounded-lg border border-white/15 bg-[#16181a]/95 px-4 py-3 shadow-xl shadow-black/50 backdrop-blur">
-      <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => { setText(e.target.value); schedule(e.target.value) }} onBlur={flush} className="max-h-[360px] min-h-24 w-full resize-none bg-transparent text-[13px] leading-relaxed text-white/90 outline-none" />
+      <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => setText(e.target.value)} className="max-h-[360px] min-h-24 w-full resize-none bg-transparent text-[13px] leading-relaxed text-white/90 outline-none" />
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-2 text-xs">
-        <span className="text-white/40">自动保存 <SaveBadge status={status} /></span>
-        {shot && <span className="text-amber-300">修改后，镜头 {no2(shot.no)} 将标记为待更新</span>}
+        <span className="shrink-0 text-white/40">收起时自动保存</span>
+        {shot && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />只改了错别字，不需要更新镜头 {no2(shot.no)}</label>}
         <button onClick={close} className="text-white/60 hover:text-white">收起</button>
       </div>
     </div>

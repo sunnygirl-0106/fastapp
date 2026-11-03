@@ -8,14 +8,15 @@ export interface ProjectConfig {
   ratio: string // 9:16 竖屏
   style: string // 写实
   mode: string // 全自动 AI 生成
-  segDur: number
+  durMode: 'auto' | 'manual'
+  targetDur?: number
 }
 
 export interface Segment {
   id: string
   no: number
   title: string
-  dur: number // 段落目标时长（秒）
+  dur?: number // 段落目标时长（秒）
   text: string // 原文
   scene?: string // 场景（截图里多为占位 —）
   roles?: string // 出场角色
@@ -53,7 +54,7 @@ export interface ShotVideo {
   stale?: boolean // 镜头被重新生成后，旧视频标记为需重新生成
 }
 
-export type OutdatedKind = 'segText' | 'segDur' | 'asset'
+export type OutdatedKind = 'segText' | 'segDur' | 'asset' | 'shotEdit'
 export interface OutdatedReason {
   kind: OutdatedKind
   key?: string
@@ -86,7 +87,8 @@ export interface Project {
   no: number
   createdAt: number
   updatedAt: number
-  config: ProjectConfig
+  // 只为未迁移的只读方案页样本保留旧结构；工作流加载时统一迁移。
+  config: ProjectConfig | { segDur: number; ratio: string; style: string; mode: string; durMode?: never; targetDur?: never }
   assetsHint?: boolean
   balance: number // 星钻余额（全局共享，这里挂项目上便于扣减演示）
   script: string

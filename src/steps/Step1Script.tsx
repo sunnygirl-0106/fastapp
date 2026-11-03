@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { DurationStepper } from '@/components/DurationChip'
+import { clampTargetDuration } from '@/data/duration'
 import { Upload } from 'lucide-react'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
@@ -27,7 +27,22 @@ export default function Step1Script({ project, locked }: { project: Project; loc
   const goStep = useStore((s) => s.goStep)
   const [text, setText] = useState(project.script)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
-  const [segDur, setSegDur] = useState(project.config.segDur)
+  const [durMode, setDurMode] = useState<'auto' | 'manual'>(project.config.durMode ?? 'auto')
+  const [targetDur, setTargetDur] = useState(String(project.config.targetDur ?? 60))
+  const [flash, setFlash] = useState(false)
+  const targetRef = useRef<HTMLInputElement>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => { if (durMode === 'manual') targetRef.current?.focus() }, [durMode])
+  useEffect(() => () => clearTimeout(flashTimer.current), [])
+  const normalizeTarget = () => {
+    const value = clampTargetDuration(targetDur.trim() ? Number(targetDur) : NaN)
+    if (!targetDur.trim() || value !== Number(targetDur)) {
+      setFlash(true); clearTimeout(flashTimer.current)
+      flashTimer.current = setTimeout(() => setFlash(false), 600)
+    }
+    setTargetDur(String(value))
+    return value
+  }
   const [confirm, setConfirm] = useState(false)
   const [model, setModel] = useState<string>(MODELS.text)
   const t = useRef<ReturnType<typeof setTimeout>>()
@@ -65,7 +80,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
     setScript(text)
     setStatus('saved')
     setConfirm(false)
-    startSegments(segDur)
+    startSegments(durMode, normalizeTarget())
   }
 
   return (
@@ -148,7 +163,14 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           title="确认拆解剧本"
           what="AI 将根据当前内容生成剧本段落。"
           model={<ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} variant="field" width={220} />}
-          extra={<div className="space-y-2"><DurationStepper value={segDur} onChange={setSegDur} title="单段时长" /><p className="text-xs text-faint">AI 会按这个时长切分段落，每段时长可在下一步单独修改</p></div>}
+          extra={<div className="space-y-3 text-[13px]">
+            <div className="text-white/70">成片时长</div>
+            <label className="flex items-center gap-2"><input type="radio" name="durMode" checked={durMode === 'auto'} onChange={() => setDurMode('auto')} className="accent-brand" />自动确定<span className="text-xs text-faint">按剧本内容确定</span></label>
+            <div className="flex items-center gap-2"><label className="flex items-center gap-2"><input type="radio" name="durMode" checked={durMode === 'manual'} onChange={() => setDurMode('manual')} className="accent-brand" />指定</label>
+              <input autoFocus={durMode === 'manual'} ref={targetRef} aria-label="目标成片时长" type="number" min={4} max={600} step={1} disabled={durMode !== 'manual'} value={targetDur} onChange={(e) => setTargetDur(e.target.value)} onBlur={normalizeTarget} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); normalizeTarget() } }} className={`h-8 w-[72px] rounded-lg bg-black/40 text-center text-sm outline-none focus:ring-1 focus:ring-brand disabled:opacity-40 ${flash ? 'text-red-400' : ''}`} />秒
+            </div>
+            <p className="text-xs text-faint">本步只把剧本拆成段落，各镜头时长会在「镜头设计」时安排。</p>
+          </div>}
           cost={COST.segGen}
           balance={project.balance}
           notice={<>开始后「剧本」将锁定，仅供查看、不可再编辑</>}

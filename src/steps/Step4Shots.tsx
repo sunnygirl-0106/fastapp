@@ -1,6 +1,6 @@
-import DurationChip from '@/components/DurationChip'
+import DurationStepper from '@/components/DurationStepper'
 import NoticeBar from '@/components/NoticeBar'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
@@ -120,13 +120,13 @@ const COL_W: Partial<Record<keyof Shot, { min: number; grow: number }>> = {
   background: { min: 140, grow: 1.2 },
 }
 
-// 拼自适应网格列：选择 44 / 镜头 150 / …可见字段列（minmax 伸缩）… / 操作 76
+// 拼自适应网格列：选择 44 / 镜头 150 / 时长 132 / …可见字段列（minmax 伸缩）… / 操作 76
 function buildGridTemplate(cols: { key: keyof Shot }[]): string {
   const fields = cols.map((c) => {
     const w = COL_W[c.key] ?? { min: 160, grow: 1.2 }
     return `minmax(${w.min}px, ${w.grow}fr)`
   })
-  return ['44px', '150px', ...fields, '76px'].join(' ')
+  return ['44px', '150px', '132px', ...fields, '76px'].join(' ')
 }
 
 export default function Step4Shots({ project }: { project: Project }) {
@@ -139,13 +139,16 @@ export default function Step4Shots({ project }: { project: Project }) {
   const st = project.shotStatus
   const shots = project.shots
 
+  const [durationPreview, setDurationPreview] = useState<Record<string, number | undefined>>({})
+  const [retainAnchor, setRetainAnchor] = useState<{ top: number; left: number } | null>(null)
+  const durationPending = pending.filter((s) => s.outdated?.some((r) => r.kind === 'segDur'))
   const [genOpen, setGenOpen] = useState(false)
   const [sel, setSel] = useState<string[]>([])
   const [detailId, setDetailId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
   const [videoConfirm, setVideoConfirm] = useState<string[] | null>(null)
 
-  // 列可见性：默认显示前两组共 7 列；镜头/选择/操作为固定列，不参与开关
+  // 列可见性：默认显示前两组共 7 列；镜头/时长/选择/操作为固定列，不参与开关
   const [visibleFields, setVisibleFields] = useState<(keyof Shot)[]>(DEFAULT_VISIBLE_FIELDS)
   const [fieldsAnchor, setFieldsAnchor] = useState<{ top: number; left: number } | null>(null)
   // 筛选条件（多条件「并且」关系）
@@ -224,14 +227,14 @@ export default function Step4Shots({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="镜头设计"
-        desc={`已生成 ${shots.length} 个镜头，预计成片时长约 ${shots.reduce((n, s) => n + s.dur, 0)} 秒`}
+        desc={`已生成 ${shots.length} 个镜头 · ${project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计` : '预计成片时长约'} ${shots.reduce((n, s) => n + (durationPreview[s.id] ?? project.segments.find((seg) => seg.id === s.segId)?.dur ?? s.dur), 0)} 秒`}
         right={<>
-          {pending.length > 0 && <PillOutline amber disabled={!!blocked} title={blocked} onClick={() => openGeneration(project.segments.filter((seg) => pending.some((s) => s.segId === seg.id)).map((s) => s.no))}>更新 {pending.length} 个待更新镜头</PillOutline>}
+
           <PillOutline disabled={!!blocked} title={blocked} onClick={() => openGeneration()}>重新生成镜头</PillOutline>
         </>}
       />
 
-      {missing.length > 0 && <NoticeBar tone="neutral" action="去生成" disabled={!!blocked} title={blocked} onAction={() => openGeneration(missing.map((s) => s.no))}>{missing.length === 1 ? `段落 ${no2(missing[0].no)} 尚未生成镜头` : `${missing.length} 个段落尚未生成镜头`}</NoticeBar>}
+
       {st === 'generating' && <NoticeBar tone="neutral">正在生成镜头，完成后可操作</NoticeBar>}
       {/* 工具条：字段 / 筛选 + 已加条件 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -321,6 +324,21 @@ export default function Step4Shots({ project }: { project: Project }) {
         )}
       </div>
 
+      {pending.length > 0 && <NoticeBar actions={[
+        { label: '全部保留当前描述', variant: 'text', onClick: (e) => {
+          if (!durationPending.length) useStore.getState().dismissAllOutdated()
+          else { const r = e.currentTarget.getBoundingClientRect(); setRetainAnchor({ top: r.bottom + 6, left: r.left }) }
+        } },
+        { label: `✦${COST.shotGenEach * pending.length} 全部重新生成`, variant: 'pill', disabled: !!blocked, title: blocked, onClick: () => openGeneration(project.segments.filter((seg) => pending.some((s) => s.segId === seg.id)).map((s) => s.no)) },
+      ]}>
+        {pending.length > 3 ? `镜头 ${pending.slice(0, 3).map((s) => no2(s.no)).join('、')} 等 ${pending.length} 个镜头` : pending.map((s) => `镜头 ${no2(s.no)}`).join('、')} 的上游内容有修改。如果只是改错别字这类不影响画面的修改，可以保留当前描述。
+      </NoticeBar>}
+      {missing.length > 0 && <NoticeBar tone="neutral" action="去生成" disabled={!!blocked} title={blocked} onAction={() => openGeneration(missing.map((s) => s.no))}>{missing.length === 1 ? `段落 ${no2(missing[0].no)} 尚未生成镜头` : `${missing.length} 个段落尚未生成镜头`}</NoticeBar>}
+      {retainAnchor && <Popover anchor={retainAnchor} width={280} onClose={() => setRetainAnchor(null)}><div className="space-y-3 p-3">
+        <p className="text-[13px] leading-relaxed">{durationPending.length === 1 ? `镜头 ${no2(durationPending[0].no)} 的时长会改回 ${durationPending[0].dur} 秒` : `镜头 ${durationPending.map((s) => no2(s.no)).join('、')} 的时长会改回原来的时长`}，确定全部保留当前描述？</p>
+        <div className="flex justify-end gap-2"><button className="rounded-full border border-white/20 px-3 py-1.5 text-xs" onClick={() => setRetainAnchor(null)}>取消</button><button className="rounded-full bg-brand px-3 py-1.5 text-xs text-black" onClick={() => { useStore.getState().dismissAllOutdated(); setRetainAnchor(null) }}>确定</button></div>
+      </div></Popover>}
+
       {/* 表格：统一深色表格（对齐设计稿）——列少自适应铺满、列多横向滚动 */}
       <div ref={scrollRef} className="table-scroll overflow-x-auto rounded-lg border border-white/10 bg-card">
         <div className="w-full min-w-[720px]">
@@ -345,6 +363,7 @@ export default function Step4Shots({ project }: { project: Project }) {
               />
             </div>
             <div className="flex h-12 items-center border-r border-white/[0.06] px-3">镜头</div>
+            <div className="flex h-12 items-center border-r border-white/[0.06] px-3">时长</div>
             {cols.map((c) => (
               <div key={c.key} className="flex h-12 items-center border-r border-white/[0.06] px-3">
                 {c.label}
@@ -382,6 +401,7 @@ export default function Step4Shots({ project }: { project: Project }) {
                   selected={sel.includes(s.id)}
                   active={detailId === s.id}
                   flash={flashId === s.id}
+                  onDurationPreview={(dur) => setDurationPreview((prev) => prev[s.id] === dur ? prev : { ...prev, [s.id]: dur })}
                   onToggleSelect={() => toggle(s.id)}
                   onCommit={(patch) => useStore.getState().updateShot(s.id, patch)}
                   onMenu={(e) => {
@@ -430,7 +450,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {menu && (
         <Popover anchor={menu} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { setDetailId(menu.s.id); setMenu(null) }}>编辑镜头详情</MenuItem>
-          <div title={blocked}><MenuItem disabled={!!blocked} onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该分镜</MenuItem></div>
+          <div title={blocked}><MenuItem disabled={!!blocked} onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem></div>
           <MenuItem onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
           <MenuItem danger onClick={() => { deleteShot(menu.s.id); setMenu(null) }}>
             删除镜头
@@ -534,6 +554,7 @@ function ShotRow({
   selected,
   active,
   flash,
+  onDurationPreview,
   onToggleSelect,
   onCommit,
   onMenu,
@@ -546,13 +567,12 @@ function ShotRow({
   selected: boolean
   active: boolean
   flash?: boolean
+  onDurationPreview: (dur: number | undefined) => void
   onToggleSelect: () => void
   onCommit: (patch: Partial<Shot>) => void
   onMenu: (e: React.MouseEvent) => void
 }) {
   const vi = videoStateInfo(shot.video)
-  const seg = project.segments.find((s) => s.id === shot.segId)
-
   return (
     <div
       id={`shot-${shot.id}`}
@@ -567,17 +587,16 @@ function ShotRow({
       </div>
 
       {/* 镜头信息 */}
-      <div className="flex flex-col justify-center gap-1 border-r border-white/[0.06] px-3 py-3">
+      <div className="flex flex-col gap-1 border-r border-white/[0.06] px-3 py-3">
         <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
-        <DurationChip title="镜头时长" value={seg?.dur ?? shot.dur} disabled={project.shotStatus === 'generating' || !seg} onSave={(dur) => seg && useStore.getState().updateSegment(seg.id, { dur })} />
-        {seg && seg.dur !== shot.dur && <span className="text-[11px] text-faint">描述按 {shot.dur} 秒编写</span>}
         <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
           {vi.text}
         </span>
         {!!shot.outdated?.length && <OutdatedChip shot={shot} project={project} />}
-        {!selected && <span className="text-[12px] text-faint">不生成</span>}
       </div>
+
+      <ShotDurationCell project={project} shot={shot} onPreview={onDurationPreview} />
 
       {/* 可见字段列（均可就地编辑） */}
       {cols.map((c) => (
@@ -965,16 +984,49 @@ function OutdatedChip({ shot, project }: { shot: Shot; project: Project }) {
     return () => window.removeEventListener('keydown', key)
   }, [])
   return <>
-    <button className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300" title={shot.outdated?.map((r) => `· ${r.text}`).join('\n')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAnchor({ top: Math.min(r.bottom + 6, window.innerHeight - 310), left: r.left }) }}><AlertTriangle size={12} />待更新</button>
+    <button className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300" title={`${shot.outdated?.map((r) => `· ${r.text}`).join('\n')}\n点击处理`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAnchor({ top: Math.min(r.bottom + 6, window.innerHeight - 310), left: r.left }) }}><AlertTriangle size={12} />待更新</button>
     {anchor && <Popover anchor={anchor} width={300} onClose={() => setAnchor(null)}><div className="space-y-3 p-4">
       <h3 className="text-sm font-medium">镜头 {no2(shot.no)} 需要更新</h3>
       <div className="space-y-1 text-xs text-amber-300">{shot.outdated?.map((r) => <p key={`${r.kind}:${r.key ?? ''}`}>· {r.text}</p>)}</div>
       <p className="text-xs leading-relaxed text-faint">重新生成会按最新内容改写这个镜头的描述；如果这次修改不影响画面（比如改了错别字），可以保留当前描述。</p>
       {hasDur && <p className="text-xs text-amber-300">保留当前描述会把时长恢复为 {shot.dur} 秒</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        <button disabled={!!blocked} title={blocked} className="rounded-full bg-brand px-3 py-2 text-xs text-black disabled:opacity-40" onClick={() => { useStore.getState().regenerateShot(shot.id); setAnchor(null) }}>✦50 重新生成该分镜</button>
         <button className="rounded-full border border-white/20 px-3 py-2 text-xs" onClick={() => { useStore.getState().dismissOutdated(shot.id); setAnchor(null) }}>保留当前描述</button>
+        <button disabled={!!blocked} title={blocked} className="rounded-full bg-brand px-3 py-2 text-xs text-black disabled:opacity-40" onClick={() => { useStore.getState().regenerateShot(shot.id); setAnchor(null) }}>✦50 重新生成</button>
       </div>
     </div></Popover>}
   </>
+}
+
+
+function ShotDurationCell({ project, shot, onPreview }: { project: Project; shot: Shot; onPreview: (dur: number | undefined) => void }) {
+  const seg = project.segments.find((s) => s.id === shot.segId)
+  const ref = useRef<HTMLDivElement>(null)
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
+  const pending = !!seg && seg.dur !== shot.dur
+  const open = anchor !== null
+  // A newly visible notice moves the table; measure after that layout has committed.
+  useLayoutEffect(() => {
+    if (!open) return
+    const r = ref.current?.getBoundingClientRect()
+    if (r) setAnchor({ top: r.bottom + 6, left: r.left })
+  }, [open, seg?.dur])
+  const blocked = shotGenerationBlocked(project)
+  useEffect(() => { if (!pending || project.shotStatus === 'generating') setAnchor(null) }, [pending, project.shotStatus])
+  return <div className="border-r border-white/[0.06] px-3 py-3">
+    <div ref={ref} className="w-fit"><DurationStepper onPreview={onPreview} variant="inline" title={`镜头 ${no2(shot.no)} 时长`} value={seg?.dur ?? shot.dur} pending={pending}
+      disabled={project.shotStatus === 'generating' || !seg}
+      tooltip={pending ? `新时长在重新生成镜头后生效，现在生成视频仍是 ${shot.dur} 秒` : undefined}
+      onChange={(dur) => {
+        if (!seg) return
+        useStore.getState().updateSegment(seg.id, { dur })
+        const r = ref.current?.getBoundingClientRect()
+        setAnchor(dur !== shot.dur && r ? { top: r.bottom + 6, left: r.left } : null)
+      }} /></div>
+    {anchor && <Popover anchor={anchor} width={264} onClose={() => setAnchor(null)}><div className="space-y-3 p-3">
+      <h3 className="text-sm font-medium">时长改为 {seg?.dur} 秒</h3>
+      <p className="text-xs leading-relaxed text-white/60">重新生成这个镜头后，画面描述和时间安排才会按 {seg?.dur} 秒重写。</p>
+      <div className="flex justify-end gap-2"><button className="rounded-full border border-white/20 px-3 py-1.5 text-xs" onClick={() => setAnchor(null)}>稍后</button><button disabled={!!blocked} title={blocked} className="rounded-full bg-brand px-3 py-1.5 text-xs text-black disabled:opacity-40" onClick={() => { useStore.getState().regenerateShot(shot.id); setAnchor(null) }}>✦{COST.shotGenEach} 重新生成</button></div>
+    </div></Popover>}
+  </div>
 }

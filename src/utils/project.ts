@@ -1,3 +1,4 @@
+import { clampDuration } from '@/data/duration'
 import { SHOT_FIELDS, type Asset, type Project, type Shot, type ShotVideo, type VideoVersion } from '@/types'
 
 /* ---------- 镜头视频版本 ----------
@@ -88,23 +89,43 @@ export function projectCover(p: Project): string | undefined {
 
 /* ---------- 展示格式 ---------- */
 export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
-export const fmtDur = (d: number | string) => `${parseInt(String(d), 10)} 秒`
+export const fmtDur = (d: number | string | undefined) => d === undefined ? '待分配' : `${parseInt(String(d), 10)} 秒`
 
 
-export function timeSlots(dur: number): [number, number][] {
-  const slots: [number, number][] = []
-  for (let start = 0; start < dur; start += 5) slots.push([start, Math.min(start + 5, dur)])
-  if (slots.length > 1 && slots[slots.length - 1][1] - slots[slots.length - 1][0] < 2) {
-    const last = slots.pop()!
-    slots[slots.length - 1][1] = last[1]
-  }
-  return slots
-}
-
+// 演示用：保留节拍内容，按新时长平均分配整数秒；真实 AI 自行组织节拍。
 export function buildTimeline(beats: string[], dur: number): string {
   const clean = beats.map((b) => b.replace(/^\s*\d+\s*[–—-]\s*\d+\s*秒[：:]\s*/, '').trim()).filter(Boolean)
-  const slots = timeSlots(dur)
-  return slots.map(([start, end], i) => `${start}–${end}秒：${(i === slots.length - 1 ? clean.slice(i).join('；') : clean[i]) || '保持当前画面与动作'}`).join('\n')
+  if (!clean.length) clean.push('保持当前画面与动作')
+  const count = dur <= 4 ? 1 : Math.min(clean.length, dur)
+  return Array.from({ length: count }, (_, i) => {
+    const text = clean.slice(Math.floor(i * clean.length / count), Math.floor((i + 1) * clean.length / count)).join('；')
+    return `${Math.round(i * dur / count)}–${Math.round((i + 1) * dur / count)}秒：${text}`
+  }).join('\n')
+}
+
+export const remainingDuration = (p: Project) => (p.config.targetDur ?? 60) - p.shots.reduce((sum, shot) => sum + (p.segments.find((seg) => seg.id === shot.segId)?.dur ?? shot.dur), 0)
+
+export function allocateShotDurations(p: Project, segs: Project['segments']): Map<string, number> {
+  const fresh = segs.filter((seg) => !p.shots.some((shot) => shot.segId === seg.id))
+  const result = new Map<string, number>()
+  if (p.config.durMode === 'manual' && fresh.length) {
+    const budget = remainingDuration(p)
+    const weights = fresh.map((seg) => seg.text.length)
+    const total = weights.reduce((a, b) => a + b, 0)
+    const exact = weights.map((w) => budget * (total ? w / total : 1 / fresh.length))
+    const rounded = exact.map(Math.floor)
+    const order = exact.map((v, i) => ({ i, fraction: v - rounded[i] })).sort((a, b) => b.fraction - a.fraction)
+    const remainder = budget - rounded.reduce((a, b) => a + b, 0)
+    order.slice(0, remainder).forEach(({ i }) => rounded[i]++)
+    fresh.forEach((seg, i) => result.set(seg.id, clampDuration(rounded[i])))
+  } else {
+    fresh.forEach((seg) => result.set(seg.id, Math.min(15, clampDuration(seg.text.length / 6))))
+  }
+  segs.forEach((seg) => {
+    const old = p.shots.find((shot) => shot.segId === seg.id)
+    if (old) result.set(seg.id, seg.dur ?? old.dur)
+  })
+  return result
 }
 
 export const outdatedShots = (p: Project) => p.shots.filter((s) => s.outdated?.length)

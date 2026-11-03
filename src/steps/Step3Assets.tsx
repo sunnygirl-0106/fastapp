@@ -1,7 +1,5 @@
 import { createPortal } from 'react-dom'
 import NoticeBar from '@/components/NoticeBar'
-import AssetLayout from '@/components/AssetLayout'
-import { assetPromptPlaceholder } from '@/data/assetTemplates'
 import { renameOccurrences, shotsReferencingAsset, shotGenerationBlocked } from '@/utils/project'
 import { useRef, useState, type ReactNode } from 'react'
 import { Eraser, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
@@ -124,7 +122,7 @@ export default function Step3Assets({ project }: { project: Project }) {
         }
       />
 
-      {project.assetsHint && <NoticeBar action="重新提取" disabled={!!blocked} title={blocked} onAction={() => setReextract(true)}>段落内容有修改，如出现了新的角色或场景，可以重新提取。</NoticeBar>}
+      {project.assetsHint && <NoticeBar actions={[{ label: '无需提取', variant: 'text', onClick: () => useStore.getState().dismissAssetsHint() }, { label: '重新提取', variant: 'pill', disabled: !!blocked, title: blocked, onClick: () => setReextract(true) }]}>段落内容有修改，如出现了新的角色或场景，可以重新提取。</NoticeBar>}
       <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
         const file = e.target.files?.[0]; const id = uploadId.current
         e.target.value = ''
@@ -169,7 +167,6 @@ export default function Step3Assets({ project }: { project: Project }) {
       {/* 批量生成参考图 */}
       {batchOpen && (
         <BatchModal
-          projectRatio={project.config.ratio.split(' ')[0]}
           assets={missing}
           balance={project.balance}
           onClose={() => setBatchOpen(false)}
@@ -184,7 +181,6 @@ export default function Step3Assets({ project }: { project: Project }) {
       {/* 单张生成参考图 */}
       {genFor && (
         <GenAssetImageModal
-          projectRatio={project.config.ratio.split(' ')[0]}
           a={genFor}
           balance={project.balance}
           onClose={() => setGenFor(null)}
@@ -207,7 +203,7 @@ export default function Step3Assets({ project }: { project: Project }) {
               a={a}
               project={project}
               onClose={() => setEditFor(null)}
-              onSave={(patch) => updateAsset(a.id, patch)}
+              onSave={(patch, options) => updateAsset(a.id, patch, options)}
             />
           )
         })()}
@@ -391,7 +387,6 @@ function ResChips({ value, onChange }: { value: string; onChange: (v: string) =>
 
 /* 单张参考图生成弹窗（对齐 Figma node 6:3453）：可编辑提示词 + 模型/比例/分辨率 + 消耗 */
 function GenAssetImageModal({
-  projectRatio,
   a,
   balance,
   onClose,
@@ -399,14 +394,13 @@ function GenAssetImageModal({
 }: {
   a: Asset
   balance: number
-  projectRatio: string
   onClose: () => void
   onConfirm: (patch: { prompt: string }) => void
 }) {
   const kindCn = a.kind === 'char' ? '角色' : '场景'
   const [prompt, setPrompt] = useState(a.prompt)
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState(a.kind === 'char' ? '16:9' : projectRatio)
+  const [ratio, setRatio] = useState('1:1')
   const [res, setRes] = useState('1K')
   const cost = COST.assetImgEach
   const ok = prompt.trim().length > 0
@@ -424,13 +418,11 @@ function GenAssetImageModal({
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
-          <AssetLayout kind={a.kind} />
-          <div className="text-sm text-white/60">参考图描述（外观）</div>
           <textarea
             rows={6}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={assetPromptPlaceholder(a.kind)}
+            placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
             className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
           />
 
@@ -462,7 +454,6 @@ function GenAssetImageModal({
 }
 
 function BatchModal({
-  projectRatio,
   assets,
   balance,
   onClose,
@@ -470,7 +461,6 @@ function BatchModal({
 }: {
   assets: Asset[]
   balance: number
-  projectRatio: string
   onClose: () => void
   onGen: (ids: string[], edits: Record<string, string>) => void
 }) {
@@ -479,7 +469,7 @@ function BatchModal({
     Object.fromEntries(assets.map((a) => [a.id, a.prompt])),
   )
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratios, setRatios] = useState<Record<string, string>>(Object.fromEntries(assets.map((a) => [a.id, a.kind === 'char' ? '16:9' : projectRatio])))
+  const [ratio, setRatio] = useState('1:1')
   const [res, setRes] = useState('1K')
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -524,13 +514,11 @@ function BatchModal({
                     {kindCn}
                   </span>
                 </label>
-                <AssetLayout kind={a.kind} />
-                <div className="flex items-center justify-between text-sm text-white/60"><span>参考图描述（外观）</span><div className="flex items-center gap-2">画面比例 <ModelSelect value={ratios[a.id]} options={['1:1', '9:16', '16:9', '4:3', '3:4']} onChange={(ratio) => setRatios((r) => ({ ...r, [a.id]: ratio }))} variant="pill" width={84} /></div></div>
                 <textarea
                   rows={4}
                   value={prompts[a.id] ?? ''}
                   onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
-                  placeholder={assetPromptPlaceholder(a.kind)}
+                  placeholder={`描述「${a.name}」的外观与画面风格`}
                   className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
                 />
               </div>
@@ -574,6 +562,10 @@ function BatchModal({
         <div className="flex shrink-0 flex-wrap items-center gap-4 px-5 py-3">
           <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} variant="pill" width={148} />
           <div className="flex items-center gap-3">
+            <span className="text-sm text-white">画面比例</span>
+            <ModelSelect value={ratio} options={['1:1', '9:16', '16:9', '4:3', '3:4']} onChange={setRatio} variant="pill" width={84} />
+          </div>
+          <div className="flex items-center gap-3">
             <span className="text-sm text-white">分辨率</span>
             <ResChips value={res} onChange={setRes} />
           </div>
@@ -603,7 +595,7 @@ function EditableAssetSettingModal({
   a: Asset
   project: Project
   onClose: () => void
-  onSave: (patch: Partial<Asset>) => void
+  onSave: (patch: Partial<Asset>, options?: { silent?: boolean }) => void
 }) {
   const isChar = a.kind === 'char'
   const kindCn = isChar ? '角色' : '场景'
@@ -612,10 +604,12 @@ function EditableAssetSettingModal({
   const duplicate = project.assets.some((x) => x.id !== a.id && x.kind === a.kind && x.name === name.trim())
   const occurrences = renameOccurrences(project, a.name)
   const save = (sync: boolean) => {
-    onSave({ desc, prompt })
+    onSave({ desc, prompt }, { silent })
     if (name.trim() !== a.name) useStore.getState().renameAsset(a.id, name, sync)
     onClose()
   }
+  const [silent, setSilent] = useState(false)
+  const affectedCount = shotsReferencingAsset(project, a).length
   const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
 
@@ -657,17 +651,17 @@ function EditableAssetSettingModal({
 
           {/* 参考图描述 */}
           <div className="flex flex-col gap-3">
-            <AssetLayout kind={a.kind} />
-            <div className="text-[14px] text-white/60">参考图描述（外观）</div>
+            <div className="text-[14px] text-white/60">参考图描述</div>
             <textarea
               rows={6}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={assetPromptPlaceholder(a.kind)}
+              placeholder={`描述「${a.name}」的外观与画面风格`}
               className={boxCls}
             />
             <div className="text-[14px] text-white/40">用于生成{kindCn}参考图</div>
           </div>
+          {affectedCount > 0 && (desc !== a.desc || prompt !== a.prompt) && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />这次修改不影响已生成的 {affectedCount} 个镜头</label>}
         </div>
 
         {/* 底部 */}
@@ -695,7 +689,7 @@ function SyncRenameModal({ oldName, newName, occurrences, onClose, onSave }: {
 }) {
   return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onMouseDown={(e) => { e.stopPropagation(); onClose() }}>
     <div className="w-[640px] max-w-[92vw] rounded-xl border border-white/5 bg-[#1c1e20] p-5 shadow-2xl backdrop-blur" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between"><h2 className="text-base font-medium">同步替换分镜文本？</h2><button aria-label="返回编辑" onClick={onClose}><X size={14} /></button></div>
+      <div className="flex items-center justify-between"><h2 className="text-base font-medium">同步替换段落和镜头文本？</h2><button aria-label="返回编辑" onClick={onClose}><X size={14} /></button></div>
       <p className="my-3 text-sm text-white/60">检测到 {occurrences.length} 处文本包含旧名称「{oldName}」</p>
       <div className="max-h-[360px] space-y-2 overflow-auto">{occurrences.map((hit, i) => <div key={i} className="rounded-lg bg-black/30 p-3"><div className="mb-2 text-xs text-faint">{hit.source}</div><p className="text-sm text-white/80">{hit.before}<span className="text-red-400 line-through">{oldName}</span><span className="text-brand">{newName}</span>{hit.after}</p></div>)}</div>
       <div className="mt-5 flex justify-end gap-2"><PillOutline onClick={() => onSave(false)}>仅修改名称</PillOutline><PillCTA onClick={() => onSave(true)}>同步替换并保存</PillCTA></div>

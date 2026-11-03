@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { AlertTriangle, X } from 'lucide-react'
+import { remainingDuration } from '@/utils/project'
 import type { Project } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
 import { Diamond, ModelSelect, Overlay, fmt } from '@/components/ui'
@@ -54,18 +55,19 @@ export default function GenShotModal({
     return (pending.length ? pending : segs).map((s) => s.no)
   })
   const toggle = (no: number) => setSel((s) => (s.includes(no) ? s.filter((x) => x !== no) : [...s, no]))
+  const newCount = segs.filter((seg) => sel.includes(seg.no) && !project.shots.some((shot) => shot.segId === seg.id)).length
   const cost = sel.length * COST.shotGenEach
   const allSel = sel.length === segs.length
   const someSel = sel.length > 0 && !allSel
 
-  const cols = 'grid grid-cols-[52px_64px_1fr_84px_84px]'
+  const cols = 'grid grid-cols-[52px_64px_minmax(0,1fr)_108px]'
 
   return (
     <Overlay onClose={onClose}>
       <div className="flex max-h-[88vh] w-[800px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
-          <div className="text-base font-medium text-white">生成分镜</div>
+          <div className="text-base font-medium text-white">生成镜头设计</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
             <X size={14} />
           </button>
@@ -73,6 +75,10 @@ export default function GenShotModal({
 
         {/* 主体 */}
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-6">
+          <div className="space-y-1 text-sm">
+            <div>成片时长：{project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒` : '自动，按内容确定'}</div>
+            {project.config.durMode === 'manual' && newCount > 0 && <p className="text-xs text-faint">已生成的镜头保留当前时长；本次新生成的 {newCount} 个镜头分配剩余 {remainingDuration(project)} 秒</p>}
+          </div>
           {/* 文本模型 */}
           <div className="space-y-2">
             <div className="text-sm text-white/60">文本模型</div>
@@ -91,9 +97,9 @@ export default function GenShotModal({
             />
           </div>
 
-          {/* 选择要生成分镜的段 */}
+          {/* 选择要生成镜头的段落 */}
           <div className="space-y-2">
-            <div className="text-sm text-white/60">选择要生成分镜的段（{segs.length}）</div>
+            <div className="text-sm text-white/60">选择要生成镜头的段落（{segs.length}）</div>
             <div className="overflow-hidden rounded-lg border border-white/10 bg-[#111213]">
               {/* 表头 */}
               <div className={`${cols} items-center border-b border-white/10 bg-white/[0.03] text-[13px] text-white/90`}>
@@ -106,7 +112,6 @@ export default function GenShotModal({
                 </div>
                 <div className="px-3">段号</div>
                 <div className="px-3">标题 / 剧本内容</div>
-                <div className="px-3">状态</div>
                 <div className="px-3">时长</div>
               </div>
               {/* 表体（可滚动） */}
@@ -124,6 +129,7 @@ export default function GenShotModal({
                           type="checkbox"
                           checked={on}
                           onChange={() => toggle(s.no)}
+                          aria-label={`选择段落 ${String(s.no).padStart(2, '0')}`}
                           className="h-[18px] w-[18px] rounded accent-brand"
                         />
                       </div>
@@ -131,11 +137,13 @@ export default function GenShotModal({
                         {String(s.no).padStart(2, '0')}
                       </div>
                       <div className="min-w-0 px-3 py-3">
-                        <div className="truncate text-[13px] text-white/90">{s.title}</div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-[13px] text-white/90">{s.title}</span>
+                          {!!shot?.outdated?.length && <span className="inline-flex w-fit shrink-0 items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-300"><AlertTriangle size={11} />待更新</span>}
+                        </div>
                         <div className="truncate text-[12px] text-white/50">{s.text}</div>
                       </div>
-                      <div className={`px-3 text-[13px] ${!shot ? 'text-faint' : shot.outdated?.length ? 'text-amber-300' : 'text-brand'}`}>{!shot ? '未生成' : shot.outdated?.length ? '待更新' : '已生成'}</div>
-                      <div className="px-3 text-[13px] text-white/70">{s.dur} 秒</div>
+                      <div className={`px-3 text-[13px] ${shot ? 'text-white/90' : 'text-faint'}`}>{shot ? `${s.dur ?? shot.dur} 秒` : '生成时确定'}</div>
                     </label>
                   )
                 })}
@@ -161,7 +169,7 @@ export default function GenShotModal({
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-between px-5 pb-5">
           <div className="text-sm text-white/60">
-            已选 {sel.length}/{segs.length} 段 · 共 {segs.filter((s) => sel.includes(s.no)).reduce((n, s) => n + s.dur, 0)} 秒
+            已选 {sel.length}/{segs.length} 段
           </div>
           <div className="flex items-center gap-2">
             <button

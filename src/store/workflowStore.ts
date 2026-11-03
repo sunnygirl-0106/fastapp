@@ -3,8 +3,8 @@ import { SHOT_FIELDS, type Asset, type Project, type Shot, type Segment, type Ou
 import { COST, delay, mockImage, uid, videoCost } from '@/services/generation'
 import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
 
-import { buildTimeline, no2, shotsReferencingAsset, shotGenerationBlocked } from '@/utils/project'
-import { clampDuration, DUR_DEFAULT } from '@/data/duration'
+import { buildTimeline, no2, shotsReferencingAsset, shotGenerationBlocked, allocateShotDurations } from '@/utils/project'
+import { clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration'
 import { buildAssetImagePrompt } from '@/data/assetTemplates'
 
 const LS_KEY = 'phanthy.projects.v2'
@@ -33,9 +33,11 @@ interface State {
   setScript: (text: string) => void
 
   // step2 拆解
-  addSegment: (title: string, text: string, dur?: number) => void
-  updateSegment: (id: string, patch: Partial<Pick<Segment, 'title' | 'text' | 'dur'>>) => void
+  addSegment: (title: string, text: string) => void
+  updateSegment: (id: string, patch: Partial<Pick<Segment, 'title' | 'text' | 'dur'>>, options?: { silent?: boolean }) => void
   dismissOutdated: (id: string) => void
+  dismissAllOutdated: () => void
+  dismissAssetsHint: () => void
   renameAsset: (id: string, name: string, sync: boolean) => void
   updateSegmentTitle: (id: string, title: string) => void
   deleteSegment: (id: string) => void
@@ -44,7 +46,7 @@ interface State {
   extractAssets: () => Promise<void>
   generateAssetImages: (ids: string[]) => Promise<void>
   clearAssetImage: (id: string) => void
-  updateAsset: (id: string, patch: Partial<Asset>) => void
+  updateAsset: (id: string, patch: Partial<Asset>, options?: { silent?: boolean }) => void
   deleteAsset: (id: string) => void
 
   // step4 镜头
@@ -57,7 +59,7 @@ interface State {
   generateVideos: (shotIds: string[]) => Promise<void>
 
   // 确认即推进：先置 generating、再切页、最后跑生成
-  startSegments: (dur?: number) => Promise<void> // Step1 → Step2
+  startSegments: (durMode?: 'auto' | 'manual', targetDur?: number) => Promise<void> // Step1 → Step2
   startAssets: () => Promise<void> // Step2 → Step3
   startShots: (segNos: number[]) => Promise<void> // Step3 → Step4
   startVideos: (shotIds: string[]) => Promise<void> // Step4 → Step5
@@ -77,7 +79,8 @@ function backfillVersionTime(projects: Project[]): Project[] {
 
 export function migrateProjects(projects: Project[]): Project[] {
   projects.forEach((p) => {
-    p.config.segDur ??= DUR_DEFAULT
+    const { segDur: _legacy, ...config } = p.config as typeof p.config & { segDur?: number }
+    p.config = { ...config, durMode: config.durMode ?? 'auto' }
     p.segments.forEach((seg) => {
       if (typeof seg.dur === 'string') seg.dur = parseInt(seg.dur, 10) || DUR_DEFAULT
     })
@@ -85,14 +88,27 @@ export function migrateProjects(projects: Project[]): Project[] {
       s.segId ??= p.segments[s.no - 1]?.id ?? ''
       s.dur ??= p.segments.find((seg) => seg.id === s.segId)?.dur ?? DUR_DEFAULT
       s.video.versions.forEach((v) => { v.dur ??= DUR_DEFAULT })
+      const seg = p.segments.find((seg) => seg.id === s.segId)
+      if (seg) seg.dur ??= s.dur
+      s.outdated?.forEach((r) => { if (r.kind === 'segDur' && seg) r.text = `时长改为 ${seg.dur} 秒，重新生成后生效` })
     })
   })
   return backfillVersionTime(projects)
 }
 
+function retainShotDescription(p: Project, shot: Shot) {
+  const hasDuration = !!shot.outdated?.some((r) => r.kind === 'segDur')
+  if (hasDuration) {
+    const seg = p.segments.find((s) => s.id === shot.segId)
+    if (seg) seg.dur = shot.dur
+  }
+  shot.outdated = []
+  return hasDuration
+}
+
 function markOutdated(p: Project, ids: string[], reason: OutdatedReason) {
   p.shots.filter((s) => ids.includes(s.id)).forEach((s) => {
-    s.outdated = [...(s.outdated ?? []).filter((r) => r.kind !== reason.kind || (r.kind === 'asset' && r.key !== reason.key)), reason]
+    s.outdated = [...(s.outdated ?? []).filter((r) => r.kind !== reason.kind || ((r.kind === 'asset' || r.kind === 'shotEdit') && r.key !== reason.key)), reason]
   })
 }
 function markVideoStale(p: Project, ids: string[], reason: string) {
@@ -109,22 +125,23 @@ function sortShots(p: Project) {
 function designShot(p: Project, seg: Segment, old?: Shot): Shot {
   const sample = sampleShots().find((s) => s.segId === seg.id)
   const originalText = sampleSegments().find((s) => s.id === seg.id)?.text
-  const base = originalText === seg.text ? sample : old && !old.outdated?.some((r) => r.kind === 'segText') ? old : undefined
+  const base = old ?? (originalText === seg.text ? sample : undefined)
+  const dur = seg.dur ?? DUR_DEFAULT
   const refs = p.assets.filter((a) => seg.text.includes(a.name) || (a.kind === 'scene' && a.belongSegs?.includes(seg.no)))
   const scene = refs.find((a) => a.kind === 'scene')
   const beats = seg.text.split(/(?<=[。！？])/).filter(Boolean)
   const shot: Shot = {
-    id: old?.id ?? uid('shot'), segId: seg.id, no: seg.no, dur: seg.dur,
+    id: old?.id ?? uid('shot'), segId: seg.id, no: seg.no, dur,
     shot: base?.shot ?? seg.text,
-    timeline: buildTimeline(base?.timeline.split('\n') ?? beats, seg.dur),
+    timeline: buildTimeline(base?.timeline.split('\n') ?? beats, dur),
     action: base?.action ?? seg.text,
     anchor: base?.anchor ?? scene?.name ?? '当前段落场景',
     motion: base?.motion ?? seg.text,
     blocking: base?.blocking ?? '根据段落动作安排人物位置',
     continuity: base?.continuity ?? '保持人物外观与场景结构一致',
-    subject: refs.filter((a) => a.kind === 'char').map((a) => a.name).join('、') || seg.title,
+    subject: base?.subject ?? (refs.filter((a) => a.kind === 'char').map((a) => a.name).join('、') || seg.title),
     forbid: base?.forbid ?? '不添加段落以外的人物与事件',
-    background: refs.map((a) => `${a.name}：${a.desc}；${a.prompt}`).join('；') || base?.background || '按段落原文呈现场景',
+    background: base?.background ?? (refs.map((a) => `${a.name}：${a.desc}；${a.prompt}`).join('；') || '按段落原文呈现场景'),
     done: true, outdated: [], video: old?.video ?? { state: 'none', versions: [] },
   }
   return shot
@@ -144,7 +161,7 @@ function load(): Project[] {
     no: 11,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    config: { segDur: DUR_DEFAULT, ratio: '9:16 竖屏', style: '写实', mode: '全自动 AI 生成' },
+    config: { durMode: 'auto', ratio: '9:16 竖屏', style: '写实', mode: '全自动 AI 生成' },
     balance: DEFAULT_BALANCE,
     script: SAMPLE_SCRIPT,
     segStatus: 'done',
@@ -188,7 +205,7 @@ export const useStore = create<State>((set, get) => {
     await delay(1600)
     patchProject((p) => {
       p.balance -= COST.segGen
-      p.segments = sampleSegments().map((s) => ({ ...s, dur: p.config.segDur }))
+      p.segments = sampleSegments().map(({ dur: _dur, ...s }) => s)
       p.segStatus = 'done'
     }, projectId)
     get().showToast('已生成 3 个剧本段落')
@@ -216,7 +233,9 @@ export const useStore = create<State>((set, get) => {
     patchProject((p) => {
       const segs = p.segments.filter((s) => segIds.includes(s.id))
       p.balance -= COST.shotGenEach * segs.length
+      const durations = allocateShotDurations(p, segs)
       segs.forEach((seg) => {
+        seg.dur = durations.get(seg.id)!
         const old = p.shots.find((s) => s.segId === seg.id)
         const next = designShot(p, seg, old)
         if (old) p.shots[p.shots.indexOf(old)] = next
@@ -282,7 +301,7 @@ export const useStore = create<State>((set, get) => {
         no: get().projects.length + 12,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        config: { segDur: DUR_DEFAULT, ratio: '9:16 竖屏', style: '写实', mode: '全自动 AI 生成' },
+        config: { durMode: 'auto', ratio: '9:16 竖屏', style: '写实', mode: '全自动 AI 生成' },
         balance: DEFAULT_BALANCE,
         script: '',
         segStatus: 'none',
@@ -315,15 +334,15 @@ export const useStore = create<State>((set, get) => {
 
     setScript: (text) => patchProject((p) => { if (p.segStatus === 'none') p.script = text }),
 
-    addSegment: (title, text, dur) => {
+    addSegment: (title, text) => {
       patchProject((p) => {
         const no = p.segments.length + 1
-        p.segments.push({ id: uid('seg'), no, title: title.trim(), dur: clampDuration(dur ?? p.config.segDur), text: text.trim() })
+        p.segments.push({ id: uid('seg'), no, title: title.trim(), text: text.trim() })
       })
       get().showToast('已新增剧本段落')
     },
     updateSegmentTitle: (id, title) => get().updateSegment(id, { title }),
-    updateSegment: (id, patch) => {
+    updateSegment: (id, patch, options) => {
       let message = ''
       patchProject((p) => {
         const seg = p.segments.find((s) => s.id === id)
@@ -335,15 +354,17 @@ export const useStore = create<State>((set, get) => {
         if (patch.title?.trim()) seg.title = patch.title.trim()
         if (textChanged) {
           seg.text = patch.text!
-          p.assetsHint = true
-          if (shot) markOutdated(p, [shot.id], { kind: 'segText', text: '段落原文已修改' })
+          if (!options?.silent) {
+            p.assetsHint = true
+            if (shot) markOutdated(p, [shot.id], { kind: 'segText', text: '段落原文已修改' })
+          }
         }
         seg.dur = dur
-        if (durChanged && shot) {
+        if (durChanged && shot && !options?.silent) {
           if (dur === shot.dur) shot.outdated = shot.outdated?.filter((r) => r.kind !== 'segDur')
-          else markOutdated(p, [shot.id], { kind: 'segDur', text: `时长已改为 ${dur} 秒，当前描述按 ${shot.dur} 秒编写` })
+          else markOutdated(p, [shot.id], { kind: 'segDur', text: `时长改为 ${dur} 秒，重新生成后生效` })
         }
-        if (textChanged || durChanged) message = shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
+        if (textChanged || durChanged) message = !options?.silent && shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
       })
       if (message) get().showToast(message)
     },
@@ -352,14 +373,20 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const shot = p.shots.find((s) => s.id === id)
         if (!shot) return
-        if (shot.outdated?.some((r) => r.kind === 'segDur')) {
-          const seg = p.segments.find((s) => s.id === shot.segId)
-          if (seg) seg.dur = shot.dur
-          message += `，时长恢复为 ${shot.dur} 秒`
-        }
-        shot.outdated = []
+        if (retainShotDescription(p, shot)) message += `，时长恢复为 ${shot.dur} 秒`
       })
       get().showToast(message)
+    },
+    dismissAllOutdated: () => {
+      let count = 0
+      patchProject((p) => {
+        p.shots.filter((s) => s.outdated?.length).forEach((s) => { retainShotDescription(p, s); count++ })
+      })
+      get().showToast(`已保留 ${count} 个镜头的当前描述`)
+    },
+    dismissAssetsHint: () => {
+      patchProject((p) => { p.assetsHint = false })
+      get().showToast('已关闭提示')
     },
     renameAsset: (id, name, sync) => {
       patchProject((p) => {
@@ -427,7 +454,7 @@ export const useStore = create<State>((set, get) => {
       get().showToast('已清除参考图')
     },
 
-    updateAsset: (id, patch) => {
+    updateAsset: (id, patch, options) => {
       let count = 0
       patchProject((p) => {
         const a = p.assets.find((a) => a.id === id)
@@ -436,7 +463,7 @@ export const useStore = create<State>((set, get) => {
         const changed = (patch.desc !== undefined && patch.desc !== a.desc) || (patch.prompt !== undefined && patch.prompt !== a.prompt)
         const imageChanged = patch.imageUrl !== undefined && patch.imageUrl !== a.imageUrl
         Object.assign(a, patch)
-        if (changed) {
+        if (changed && !options?.silent) {
           count = refs.length
           markOutdated(p, refs, { kind: 'asset', key: id, text: `${assetLabel(a)}设定已修改` })
         }
@@ -472,6 +499,9 @@ export const useStore = create<State>((set, get) => {
           ([k, v]) => String(s[k as keyof Shot] ?? '') !== String(v ?? ''),
         )
         if (!changed) return
+        SHOT_FIELDS.forEach(({ key, label }) => {
+          if (key in patch && String(s[key] ?? '') !== String(patch[key] ?? '')) markOutdated(p, [id], { kind: 'shotEdit', key, text: `${label}已修改` })
+        })
         Object.assign(s, patch)
         // 镜头内容变了，已有视频失效
         if (SHOT_FIELDS.some(({ key }) => key in patch)) markVideoStale(p, [id], '镜头描述已修改')
@@ -504,11 +534,11 @@ export const useStore = create<State>((set, get) => {
     },
 
     /* ---------- 确认即推进：先置 generating，再切页，最后跑生成 ---------- */
-    startSegments: async (dur) => {
+    startSegments: async (durMode = 'auto', targetDur) => {
       const projectId = get().currentId
       const p = get().projects.find((p) => p.id === projectId)
       if (!p || p.segStatus !== 'none') return
-      patchProject((p) => { p.config.segDur = clampDuration(dur ?? p.config.segDur) })
+      patchProject((p) => { p.config = { ratio: p.config.ratio, style: p.config.style, mode: p.config.mode, durMode, ...(durMode === 'manual' ? { targetDur: clampTargetDuration(targetDur ?? 60) } : {}) } })
       patchProject((p) => { p.segStatus = 'generating' })
       set({ step: 2 })
       await finishSegments(projectId)

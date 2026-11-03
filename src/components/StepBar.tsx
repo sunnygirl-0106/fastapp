@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties } from 'react'
-import { outdatedShots, ungeneratedSegments } from '@/utils/project'
+import { outdatedShots } from '@/utils/project'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 
@@ -86,7 +86,7 @@ export default function StepBar({
           const n = i + 1
           const st = stateOf(i)
           const notReached = !unlocked[i]
-          const hint = i === 2 && project.assetsHint ? '段落有修改，可重新提取' : i === 3 ? [outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : '', ungeneratedSegments(project).length ? `${ungeneratedSegments(project).length} 个段落尚未生成镜头` : ''].filter(Boolean).join('；') : ''
+          const hint = i === 2 && project.assetsHint && project.assetStatus !== 'generating' ? '段落有修改，可重新提取' : i === 3 && project.shotStatus !== 'generating' && outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : ''
           return (
             <Fragment key={n}>
               <button
@@ -143,7 +143,6 @@ export default function StepBar({
                       style={{ background: FILL[st] }}
                     />
                   )}
-                  {hint && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-400 ring-[1.5px] ring-[#111213]" />}
                   {st === 'active' && (
                     <div
                       className="absolute inset-y-0 w-[44%]"
