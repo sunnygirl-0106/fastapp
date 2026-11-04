@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
-import { remainingDuration } from '@/utils/project'
 import type { Project } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
 import { Diamond, ModelSelect, Overlay, fmt } from '@/components/ui'
+import DurationStepper from '@/components/DurationStepper'
 
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
@@ -44,23 +44,26 @@ export default function GenShotModal({
   initialSelection?: number[]
   project: Project
   onClose: () => void
-  onConfirm: (segNos: number[]) => void
+  onConfirm: (segNos: number[], durations: Record<string, number>, style: string) => void
 }) {
   const segs = project.segments
-  const [style, setStyle] = useState('')
+  const [style, setStyle] = useState(project.config.shotStyle ?? '')
   const [model, setModel] = useState<string>(MODELS.text)
-  const [sel, setSel] = useState<number[]>(() => {
-    if (initialSelection) return initialSelection
+  const [draft, setDraft] = useState(() => {
     const pending = segs.filter((seg) => { const shot = project.shots.find((s) => s.segId === seg.id); return !shot || shot.outdated?.length })
-    return (pending.length ? pending : segs).map((s) => s.no)
+    const sel = initialSelection ?? (pending.length ? pending : segs).map((s) => s.no)
+    const durations = new Map(segs.map((seg) => [seg.id, seg.dur!]))
+    return { sel, durations }
   })
-  const toggle = (no: number) => setSel((s) => (s.includes(no) ? s.filter((x) => x !== no) : [...s, no]))
-  const newCount = segs.filter((seg) => sel.includes(seg.no) && !project.shots.some((shot) => shot.segId === seg.id)).length
+  const { sel, durations } = draft
+  const setSelection = (sel: number[]) => setDraft((prev) => ({ ...prev, sel }))
+  const toggle = (no: number) => setSelection(sel.includes(no) ? sel.filter((x) => x !== no) : [...sel, no])
+  const total = segs.reduce((sum, seg) => sum + (sel.includes(seg.no) ? durations.get(seg.id)! : seg.dur!), 0)
   const cost = sel.length * COST.shotGenEach
   const allSel = sel.length === segs.length
   const someSel = sel.length > 0 && !allSel
 
-  const cols = 'grid grid-cols-[52px_64px_minmax(0,1fr)_108px]'
+  const cols = 'grid grid-cols-[52px_64px_minmax(0,1fr)_128px]'
 
   return (
     <Overlay onClose={onClose}>
@@ -76,8 +79,8 @@ export default function GenShotModal({
         {/* 主体 */}
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-6">
           <div className="space-y-1 text-sm">
-            <div>成片时长：{project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒` : '自动，按内容确定'}</div>
-            {project.config.durMode === 'manual' && newCount > 0 && <p className="text-xs text-faint">已生成的镜头保留当前时长；本次新生成的 {newCount} 个镜头分配剩余 {remainingDuration(project)} 秒</p>}
+            <div className="text-white">成片时长：{project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计 ${total} 秒` : `自动，按内容确定 · 预计合计 ${total} 秒`}</div>
+            {sel.length > 0 && <p className="text-xs text-faint">可在下方逐段调整（4–30 秒），生成后也可以随时修改。</p>}
           </div>
           {/* 文本模型 */}
           <div className="space-y-2">
@@ -107,7 +110,7 @@ export default function GenShotModal({
                   <HeadCheckbox
                     checked={allSel}
                     indeterminate={someSel}
-                    onChange={() => setSel(allSel ? [] : segs.map((s) => s.no))}
+                    onChange={() => setSelection(allSel ? [] : segs.map((s) => s.no))}
                   />
                 </div>
                 <div className="px-3">段号</div>
@@ -143,7 +146,13 @@ export default function GenShotModal({
                         </div>
                         <div className="truncate text-[12px] text-white/50">{s.text}</div>
                       </div>
-                      <div className={`px-3 text-[13px] ${shot ? 'text-white/90' : 'text-faint'}`}>{shot ? `${s.dur ?? shot.dur} 秒` : '生成时确定'}</div>
+                      <div className="flex cursor-default items-center self-stretch px-3 text-[13px] text-white/40"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation() }}>
+                        {on ? <DurationStepper value={durations.get(s.id)!} variant="inline" size="sm" debounceMs={0}
+                          title={`段落 ${String(s.no).padStart(2, '0')} 时长`}
+                          onChange={(dur) => setDraft((prev) => ({ ...prev, durations: new Map(prev.durations).set(s.id, dur) }))}
+                        /> : `${s.dur} 秒`}
+                      </div>
                     </label>
                   )
                 })}
@@ -179,7 +188,7 @@ export default function GenShotModal({
               取消
             </button>
             <button
-              onClick={() => onConfirm(sel)}
+              onClick={() => onConfirm(sel, Object.fromEntries(segs.filter((seg) => sel.includes(seg.no)).map((seg) => [seg.id, durations.get(seg.id)!])), style)}
               disabled={!sel.length}
               style={CTA_GRADIENT}
               className="h-10 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"

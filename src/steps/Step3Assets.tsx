@@ -1,8 +1,7 @@
 import { createPortal } from 'react-dom'
-import NoticeBar from '@/components/NoticeBar'
 import { renameOccurrences, shotsReferencingAsset, shotGenerationBlocked } from '@/utils/project'
 import { useRef, useState, type ReactNode } from 'react'
-import { Eraser, Image, MoreVertical, Pencil, Sparkles, Trash2, X } from 'lucide-react'
+import { Eraser, Image, MoreVertical, Plus, Pencil, Sparkles, Trash2, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -10,7 +9,6 @@ import {
   ActionBar,
   Button,
   Diamond,
-  GenerateConfirmModal,
   GeneratingState,
   Modal,
   ModelSelect,
@@ -55,7 +53,7 @@ function PillOutline({ children, onClick, disabled, title }: { children: ReactNo
 }
 
 export default function Step3Assets({ project }: { project: Project }) {
-  const { extractAssets, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots, goStep } =
+  const { addAsset, generateAssetImages, clearAssetImage, updateAsset, deleteAsset, startShots, goStep } =
     useStore()
   const blocked = shotGenerationBlocked(project)
   const imagesGenerating = project.assets.some((a) => a.imgState === 'generating')
@@ -67,7 +65,7 @@ export default function Step3Assets({ project }: { project: Project }) {
   const scenes = project.assets.filter((a) => a.kind === 'scene')
   const missing = project.assets.filter((a) => a.imgState !== 'done')
 
-  const [reextract, setReextract] = useState(false)
+  const [addKind, setAddKind] = useState<Asset['kind'] | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
   const [genFor, setGenFor] = useState<Asset | null>(null)
   const [editFor, setEditFor] = useState<string | null>(null)
@@ -115,14 +113,8 @@ export default function Step3Assets({ project }: { project: Project }) {
       <PageHeader
         title="角色与场景"
         desc="完善角色与场景的设定和参考图，可以让后续画面更加一致。"
-        right={
-          <PillOutline disabled={!!blocked} title={blocked} onClick={() => setReextract(true)}>
-            重新提取
-          </PillOutline>
-        }
       />
 
-      {project.assetsHint && <NoticeBar actions={[{ label: '无需提取', variant: 'text', onClick: () => useStore.getState().dismissAssetsHint() }, { label: '重新提取', variant: 'pill', disabled: !!blocked, title: blocked, onClick: () => setReextract(true) }]}>段落内容有修改，如出现了新的角色或场景，可以重新提取。</NoticeBar>}
       <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
         const file = e.target.files?.[0]; const id = uploadId.current
         e.target.value = ''
@@ -132,13 +124,13 @@ export default function Step3Assets({ project }: { project: Project }) {
         reader.readAsDataURL(file)
       }} />
       <Section title="角色" count={chars.length}>
-        <div className={gridCls}>{renderCards(chars, '暂无角色')}</div>
+        <div className={gridCls}>{renderCards(chars, '暂无角色')}<AddAssetCard kind="char" onClick={() => setAddKind('char')} /></div>
       </Section>
       <Section title="场景" count={scenes.length}>
-        <div className={gridCls}>{renderCards(scenes, '暂无场景')}</div>
+        <div className={gridCls}>{renderCards(scenes, '暂无场景')}<AddAssetCard kind="scene" onClick={() => setAddKind('scene')} /></div>
       </Section>
 
-      <ActionBar left="镜头将参考已生成的角色与场景图，保持画面一致">
+      <ActionBar left="生成视频时会参考这些角色与场景图，保持画面一致">
         {imagesGenerating ? <PillCTA disabled>正在生成参考图…</PillCTA> : missing.length > 0 ? <>
           <PillCTA onClick={() => setBatchOpen(true)}>✦{fmt(missing.length * COST.assetImgEach)} 生成全部参考图</PillCTA>
           {project.shots.length > 0 && <PillOutline onClick={() => goStep(4)}>下一步：镜头设计</PillOutline>}
@@ -146,23 +138,11 @@ export default function Step3Assets({ project }: { project: Project }) {
           <span title={blocked}><PillCTA disabled={!!blocked} onClick={() => setShotOpen(true)}>✦{fmt(project.segments.length * COST.shotGenEach)} 生成镜头设计</PillCTA></span>}
       </ActionBar>
 
-      {/* 重新提取确认 */}
-      {reextract && (
-        <GenerateConfirmModal
-          title="确认重新提取角色与场景"
-          what="重新提取将重建角色与场景列表，同名角色和场景会保留已生成的参考图；已生成的镜头会标记为待更新。"
-          disabled={!!blocked}
-          model={MODELS.text}
-          cost={COST.assetExtract}
-          balance={project.balance}
-          confirmText="确认并重新提取"
-          onClose={() => setReextract(false)}
-          onConfirm={() => {
-            setReextract(false)
-            extractAssets()
-          }}
-        />
-      )}
+      {addKind && <EditableAssetSettingModal
+        a={{ id: 'new-asset', kind: addKind, name: '', desc: '', prompt: '', importance: 'minor', imgState: 'none' }}
+        project={project} isNew onClose={() => setAddKind(null)}
+        onSave={(patch) => addAsset(addKind, { name: patch.name ?? '', desc: patch.desc ?? '', prompt: patch.prompt ?? '' })}
+      />}
 
       {/* 批量生成参考图 */}
       {batchOpen && (
@@ -211,7 +191,7 @@ export default function Step3Assets({ project }: { project: Project }) {
       {deleteFor && <Modal title={`删除${deleteFor.kind === 'char' ? '角色' : '场景'}`} width={480} onClose={() => setDeleteFor(null)} footer={<><Button onClick={() => setDeleteFor(null)}>取消</Button><Button variant="danger-solid" onClick={() => { deleteAsset(deleteFor.id); setDeleteFor(null) }}>删除{deleteFor.kind === 'char' ? '角色' : '场景'}</Button></>}>
         <p className="text-sm leading-relaxed text-white/80">{(() => {
           const n = shotsReferencingAsset(project, deleteFor).length
-          return n ? `「${deleteFor.name}」被 ${n} 个镜头引用。删除后，这些镜头生成视频时不再参考该${deleteFor.kind === 'char' ? '角色' : '场景'}图，并会标记为待更新。` : `确定删除「${deleteFor.name}」吗？`
+          return n ? `「${deleteFor.name}」被 ${n} 个镜头引用。删除后，这些镜头会标记为待更新，已生成的视频会标记为需重新生成。` : `确定删除「${deleteFor.name}」吗？`
         })()}</p>
       </Modal>}
 
@@ -222,9 +202,9 @@ export default function Step3Assets({ project }: { project: Project }) {
         <GenShotModal
           project={project}
           onClose={() => setShotOpen(false)}
-          onConfirm={(segNos) => {
+          onConfirm={(segNos, durations, style) => {
             setShotOpen(false)
-            startShots(segNos)
+            startShots(segNos, durations, style)
           }}
         />
       )}
@@ -296,6 +276,13 @@ function Section({ title, count, children }: { title: string; count: number; chi
       {children}
     </div>
   )
+}
+
+function AddAssetCard({ kind, onClick }: { kind: Asset['kind']; onClick: () => void }) {
+  return <button onClick={onClick} className="relative flex flex-col rounded-lg border border-dashed border-white/20 bg-panel text-sm text-white/60 transition-colors hover:border-brand/50 hover:text-brand">
+    <span aria-hidden className="aspect-square w-full" /><span aria-hidden className="h-[66px]" />
+    <span className="absolute inset-0 flex flex-col items-center justify-center gap-3"><Plus size={28} />新增{kind === 'char' ? '角色' : '场景'}</span>
+  </button>
 }
 
 function AssetCard({
@@ -587,11 +574,13 @@ function BatchModal({
 }
 
 function EditableAssetSettingModal({
+  isNew = false,
   project,
   a,
   onClose,
   onSave,
 }: {
+  isNew?: boolean
   a: Asset
   project: Project
   onClose: () => void
@@ -600,12 +589,13 @@ function EditableAssetSettingModal({
   const isChar = a.kind === 'char'
   const kindCn = isChar ? '角色' : '场景'
   const [name, setName] = useState(a.name)
+  const [nameTouched, setNameTouched] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const duplicate = project.assets.some((x) => x.id !== a.id && x.kind === a.kind && x.name === name.trim())
   const occurrences = renameOccurrences(project, a.name)
   const save = (sync: boolean) => {
-    onSave({ desc, prompt }, { silent })
-    if (name.trim() !== a.name) useStore.getState().renameAsset(a.id, name, sync)
+    onSave(isNew ? { name, desc, prompt } : { desc, prompt }, { silent })
+    if (!isNew && name.trim() !== a.name) useStore.getState().renameAsset(a.id, name, sync)
     onClose()
   }
   const [silent, setSilent] = useState(false)
@@ -621,7 +611,7 @@ function EditableAssetSettingModal({
       <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
-          <div className="text-base font-medium text-white">编辑{kindCn}设定</div>
+          <div className="text-base font-medium text-white">{isNew ? `新增${kindCn}` : `编辑${kindCn}设定`}</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
             <X size={14} />
           </button>
@@ -632,9 +622,9 @@ function EditableAssetSettingModal({
           {/* 名称与同类型重名校验 */}
           <div className="flex flex-col gap-2">
             <div className="text-[14px] text-white/60">{kindCn}名称</div>
-            <input aria-label={`${kindCn}名称`} className={boxCls} value={name} onChange={(e) => setName(e.target.value)} />
+            <input aria-label={`${kindCn}名称`} className={boxCls} value={name} onChange={(e) => { setName(e.target.value); setNameTouched(true) }} />
             {duplicate && <p className="text-xs text-red-400">已存在同名{kindCn}</p>}
-            {!name.trim() && <p className="text-xs text-red-400">名称不能为空</p>}
+            {nameTouched && !name.trim() && <p className="text-xs text-red-400">名称不能为空</p>}
           </div>
 
           {/* 描述 */}
@@ -644,7 +634,7 @@ function EditableAssetSettingModal({
               rows={5}
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder={`描述「${a.name}」的设定`}
+              placeholder={`描述${name.trim() ? `「${name.trim()}」` : kindCn}的设定`}
               className={boxCls}
             />
           </div>
@@ -656,12 +646,12 @@ function EditableAssetSettingModal({
               rows={6}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={`描述「${a.name}」的外观与画面风格`}
+              placeholder={`描述${name.trim() ? `「${name.trim()}」` : kindCn}的外观与画面风格`}
               className={boxCls}
             />
             <div className="text-[14px] text-white/40">用于生成{kindCn}参考图</div>
           </div>
-          {affectedCount > 0 && (desc !== a.desc || prompt !== a.prompt) && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />这次修改不影响已生成的 {affectedCount} 个镜头</label>}
+          {affectedCount > 0 && !isNew && desc !== a.desc && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />这次修改不影响已生成的 {affectedCount} 个镜头</label>}
         </div>
 
         {/* 底部 */}
@@ -670,11 +660,13 @@ function EditableAssetSettingModal({
           <PillCTA
             disabled={!name.trim() || duplicate}
             onClick={() => {
-              if (name.trim() !== a.name && occurrences.length) setSyncOpen(true)
+              setNameTouched(true)
+              if (!name.trim() || duplicate) return
+              if (!isNew && name.trim() !== a.name && occurrences.length) setSyncOpen(true)
               else save(false)
             }}
           >
-            保存
+            {isNew ? '添加' : '保存'}
           </PillCTA>
         </div>
         {syncOpen && <SyncRenameModal oldName={a.name} newName={name.trim()} occurrences={occurrences} onClose={() => setSyncOpen(false)} onSave={save} />}

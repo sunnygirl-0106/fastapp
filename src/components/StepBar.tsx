@@ -86,7 +86,7 @@ export default function StepBar({
           const n = i + 1
           const st = stateOf(i)
           const notReached = !unlocked[i]
-          const hint = i === 2 && project.assetsHint && project.assetStatus !== 'generating' ? '段落有修改，可重新提取' : i === 3 && project.shotStatus !== 'generating' && outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : ''
+          const hint = i === 3 && project.shotStatus !== 'generating' && outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : ''
           return (
             <Fragment key={n}>
               <button

@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import { clampDuration, DUR_MIN, DUR_MAX } from '@/data/duration'
 
-export function DurationStepper({ value, onChange, onPreview, title = '段落时长', onClamp, variant = 'default', size, disabled, pending, tooltip, debounceMs = 800 }: {
+export function DurationStepper({ value, onChange, onPreview, title = '段落时长', onClamp, variant = 'default', size, disabled, pending, tooltip, disabledTooltip = '正在生成镜头，完成后可调整', debounceMs = 800 }: {
   onPreview?: (value: number | undefined) => void
   value: number; onChange: (value: number) => void; title?: string; onClamp?: () => void
-  variant?: 'default' | 'inline'; size?: 'sm'; disabled?: boolean; pending?: boolean; tooltip?: string; debounceMs?: number
+  variant?: 'default' | 'inline'; size?: 'sm'; disabled?: boolean; pending?: boolean; tooltip?: string; disabledTooltip?: string; debounceMs?: number
 }) {
   const [draft, setDraft] = useState(String(value))
   const [flash, setFlash] = useState(false)
@@ -46,14 +46,14 @@ export function DurationStepper({ value, onChange, onPreview, title = '段落时
   const buttonClass = inline
     ? 'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/70 enabled:hover:bg-white/5 enabled:hover:text-white disabled:opacity-30'
     : 'flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 enabled:hover:bg-white/10 disabled:opacity-30'
-  return <div className={inline ? 'w-fit' : 'space-y-2'} title={disabled ? '正在生成镜头，完成后可调整' : tooltip}>
+  return <div className={inline ? 'w-fit' : 'space-y-2'} title={disabled ? disabledTooltip || undefined : tooltip}>
     {!inline && <div className="text-[13px] text-white/70">{title}</div>}
     <div className={inline ? `flex w-fit items-center rounded-full border bg-white/[0.03] px-1 ${size === 'sm' ? 'h-7' : 'h-8'} ${pending ? 'border-amber-400/40' : 'border-white/15 hover:border-white/25'} ${disabled ? 'opacity-50' : ''}` : 'flex items-center gap-2'}>
       <button type="button" aria-label="减少时长" disabled={disabled || Number(draft) <= DUR_MIN} className={buttonClass} onMouseDown={(e) => e.preventDefault()} onClick={() => step(-1)}><Minus size={14} /></button>
       <input aria-label={title} type="number" min={DUR_MIN} max={DUR_MAX} step={1} disabled={disabled} value={draft}
         onChange={(e) => {
           clearTimeout(timer.current); setDraft(e.target.value)
-          if (!inline && e.target.value && Number(e.target.value) >= DUR_MIN && Number(e.target.value) <= DUR_MAX && Number.isInteger(Number(e.target.value))) commit(Number(e.target.value))
+          if ((!inline || debounceMs === 0) && e.target.value && Number(e.target.value) >= DUR_MIN && Number(e.target.value) <= DUR_MAX && Number.isInteger(Number(e.target.value))) commit(Number(e.target.value))
         }}
         onBlur={() => commit(normalize(draft))} onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); commit(normalize(draft)) }

@@ -1,8 +1,10 @@
+import SegmentConfirmModal from './SegmentConfirmModal'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 import type { Project, Segment, Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
+import DurationStepper from '@/components/DurationStepper'
 import { no2 } from '@/utils/project'
 import {
   ActionBar,
@@ -45,15 +47,18 @@ function PillOutline({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
   disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 px-5 text-sm font-medium text-white transition-colors hover:bg-white/5 disabled:opacity-40"
     >
       {children}
@@ -62,8 +67,10 @@ function PillOutline({
 }
 
 export default function Step2Segments({ project }: { project: Project }) {
-  const { updateSegment, startAssets, addSegment, updateSegmentTitle, deleteSegment, goStep } = useStore()
+  const { updateSegment, startAssets, addSegment, updateSegmentTitle, deleteSegment, restartSegments, goStep } = useStore()
+  const [durationPreview, setDurationPreview] = useState<Record<string, number | undefined>>({})
   const [addOpen, setAddOpen] = useState(false)
+  const [redoOpen, setRedoOpen] = useState(false)
   const [extractOpen, setExtractOpen] = useState(false)
   const [confirmDel, setConfirmDel] = useState<Segment | null>(null)
   const [extractModel, setExtractModel] = useState<string>(MODELS.text)
@@ -94,9 +101,10 @@ export default function Step2Segments({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="剧本拆解"
-        desc={`共 ${segs.length} 个剧本段落 · ${project.config.durMode === 'manual' ? `目标成片 ${project.config.targetDur} 秒，各镜头时长在镜头设计时分配` : '各镜头时长在镜头设计时按内容确定'}`}
+        desc={`共 ${segs.length} 个剧本段落 · ${project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计` : '预计成片时长约'} ${segs.reduce((sum, seg) => sum + (durationPreview[seg.id] ?? seg.dur ?? 0), 0)} 秒`}
         right={
           <>
+            <PillOutline disabled={assetStatus !== 'none'} title={assetStatus !== 'none' ? '已开始提取角色与场景，不能重新拆解，可以直接修改段落' : undefined} onClick={() => setRedoOpen(true)}>重新拆解</PillOutline>
             <PillPrimary onClick={() => setAddOpen(true)}>
               <Plus size={14} strokeWidth={2.5} /> 新增剧本段落
             </PillPrimary>
@@ -113,6 +121,8 @@ export default function Step2Segments({ project }: { project: Project }) {
             onUpdate={(patch, options) => updateSegment(s.id, patch, options)}
             onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
             onDelete={() => setConfirmDel(s)}
+            durationDisabled={project.shotStatus === 'generating'}
+            onDurationPreview={(dur) => setDurationPreview((prev) => ({ ...prev, [s.id]: dur }))}
           />
         ))}
         {segs.length === 0 && (
@@ -123,13 +133,13 @@ export default function Step2Segments({ project }: { project: Project }) {
       </div>
 
       <BottomBar
-        assetsHint={project.assetsHint}
         assetStatus={assetStatus}
         disabled={segs.length === 0}
         onExtract={() => setExtractOpen(true)}
         onNext={() => goStep(3)}
       />
 
+      {redoOpen && <SegmentConfirmModal project={project} mode="redo" onClose={() => setRedoOpen(false)} onConfirm={(mode, target) => { setRedoOpen(false); restartSegments(mode, target) }} />}
       {/* 新增剧本段落弹窗 */}
       {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
 
@@ -184,13 +194,11 @@ export default function Step2Segments({ project }: { project: Project }) {
 
 /* ---------- 底部主按钮：区分「往前走」与「重做」 ---------- */
 function BottomBar({
-  assetsHint,
   assetStatus,
   disabled,
   onExtract,
   onNext,
 }: {
-  assetsHint?: boolean
   assetStatus: Project['assetStatus']
   disabled: boolean
   onExtract: () => void
@@ -204,10 +212,10 @@ function BottomBar({
       </ActionBar>
     )
   }
-  // 已提取：直接往前，可提示用户重新提取
+  // 已提取：直接往前
   if (assetStatus === 'done') {
     return (
-      <ActionBar left={assetsHint ? '段落有修改，如出现新角色或场景，可在下一步重新提取' : undefined}>
+      <ActionBar>
         <PillPrimary disabled={disabled} onClick={onNext}>
           下一步：角色与场景
         </PillPrimary>
@@ -232,7 +240,11 @@ function ParagraphCard({
   onUpdate,
   onRenameTitle,
   onDelete,
+  durationDisabled,
+  onDurationPreview,
 }: {
+  durationDisabled: boolean
+  onDurationPreview: (dur: number | undefined) => void
   seg: Segment
   shot?: Shot
   onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>, options?: { silent?: boolean }) => void
@@ -275,13 +287,17 @@ function ParagraphCard({
           </button>
         )}
         {!!shot?.outdated?.length && <span className="text-xs text-amber-300">镜头待更新</span>}
+        <div className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+          <DurationStepper value={seg.dur!} variant="inline" size="sm" title={`段落 ${no2(seg.no)} 时长`}
+            disabled={durationDisabled} disabledTooltip=""
+            onPreview={onDurationPreview} onChange={(dur) => onUpdate({ dur })} />
+        </div>
         <button
           type="button"
-
           title="删除段落"
           aria-label="删除段落"
           onClick={onDelete}
-          className="ml-auto rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/40"
+          className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/40"
         >
           <Trash2 size={14} />
         </button>
@@ -321,10 +337,11 @@ function AddSegModal({
 }: {
   nextNo: number
   onClose: () => void
-  onAdd: (title: string, text: string) => void
+  onAdd: (title: string, text: string, dur: number) => void
 }) {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
+  const [dur, setDur] = useState(15)
   const ok = title.trim() && text.trim()
   const boxCls =
     'w-full resize-none rounded-lg border border-transparent bg-black/40 px-3 py-2.5 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
@@ -348,6 +365,7 @@ function AddSegModal({
             </div>
           </div>
           <div className="flex flex-col gap-2">
+            <DurationStepper title="新增段落时长" value={dur} onChange={setDur} debounceMs={0} />
             <div className="text-[14px] text-white/60">段落标题</div>
             <input
               placeholder="例如：苏可推门对峙"
@@ -371,7 +389,7 @@ function AddSegModal({
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
           <PillOutline onClick={onClose}>取消</PillOutline>
-          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text); onClose() }}>
+          <PillPrimary disabled={!ok} onClick={() => { onAdd(title, text, dur); onClose() }}>
             添加
           </PillPrimary>
         </div>

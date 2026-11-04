@@ -1,3 +1,4 @@
+import VideoStaleChip from '@/components/VideoStaleChip'
 import { useState } from 'react'
 import { Download, Monitor, MoreVertical, Play, X } from 'lucide-react'
 import type { Project, Shot } from '@/types'
@@ -48,6 +49,8 @@ export default function Step5Video({ project }: { project: Project }) {
 
   const [play, setPlay] = useState<Shot | null>(null)
   const [info, setInfo] = useState<Shot | null>(null)
+  const [infoVersion, setInfoVersion] = useState<string>('')
+  const selectedVersion = info?.video.versions.find((v) => v.tag === infoVersion) ?? (info ? preferredVersion(info.video) : undefined)
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
 
   if (vids.length === 0) {
@@ -136,7 +139,7 @@ export default function Step5Video({ project }: { project: Project }) {
                 <div className="flex items-center justify-between text-[12px]">
                   <span className={`font-medium ${done ? 'text-[#00d8dc]' : 'text-[#dcb400]'}`}>
                     {done ? '已完成' : '生成中'}
-                    {s.video.stale && <span className="text-amber-300" title={s.video.staleReason}> · 可重新生成</span>}
+                    {s.video.stale && done && <VideoStaleChip shot={s} fromVideoPage onRegenerate={() => goStep(4)} />}
                   </span>
                   <span className="text-white/40">{preferredVersion(s.video)?.dur ?? s.dur} 秒</span>
                 </div>
@@ -163,7 +166,7 @@ export default function Step5Video({ project }: { project: Project }) {
           </button>
           <button
             className="flex items-center gap-2 text-[14px] text-white/90 transition-colors hover:text-white"
-            onClick={() => { setInfo(menu.s); setMenu(null) }}
+            onClick={() => { setInfo(menu.s); setInfoVersion(preferredVersion(menu.s.video)?.tag ?? ''); setMenu(null) }}
           >
             <Monitor size={16} className="shrink-0" />
             查看镜头信息
@@ -184,7 +187,25 @@ export default function Step5Video({ project }: { project: Project }) {
 
             {/* 内容：只读，滑条仅悬浮时显示 */}
             <div className="table-scroll flex flex-col gap-6 overflow-y-auto px-6 py-6">
-              <div className="text-sm text-white/70">时长：{preferredVersion(info.video)?.dur ?? info.dur} 秒</div>
+              <div className="flex items-center gap-4">
+                <div className="text-sm text-white/70">时长：{selectedVersion?.dur ?? info.dur} 秒</div>
+                {info.video.versions.length > 1 && <select aria-label="视频信息版本" className="rounded bg-black/40 p-2 text-sm" value={selectedVersion?.tag} onChange={(e) => setInfoVersion(e.target.value)}>
+                  {info.video.versions.map((v) => <option key={v.tag} value={v.tag}>{v.tag}</option>)}
+                </select>}
+              </div>
+              <section className="space-y-3">
+                <h3 className="text-base text-white/90">视频提示词</h3>
+                <div className="whitespace-pre-wrap text-sm leading-6 text-white/80">{selectedVersion?.videoPrompt ?? '此历史版本未保存视频提示词'}</div>
+              </section>
+              <section className="space-y-3">
+                <h3 className="text-base text-white/90">生成时的参考图</h3>
+                {selectedVersion?.referenceImages === undefined ? <p className="text-sm text-white/50">此历史版本未保存参考图列表</p> : selectedVersion.referenceImages.length === 0 ? <p className="text-sm text-white/50">未使用参考图</p> :
+                  <div className="flex flex-wrap gap-4">{selectedVersion.referenceImages.map((ref) => <figure key={ref.assetId} className="w-32">
+                    <img src={ref.imageUrl} alt={`${ref.label} ${ref.name}`} className="h-32 w-32 rounded object-cover" />
+                    <figcaption className="mt-2 text-xs text-white/70">{ref.label} · {ref.kind === 'char' ? '角色' : '场景'}「{ref.name}」</figcaption>
+                  </figure>)}</div>}
+              </section>
+              <div className="text-sm text-white/50">当前镜头设计</div>
               {SHOT_GROUPS.map((g) => (
                 <div key={g.title} className="flex flex-col gap-4">
                   <div className="text-[16px] font-medium leading-[18px] text-white/90">{g.title}</div>

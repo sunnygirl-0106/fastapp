@@ -10,13 +10,14 @@ export interface ProjectConfig {
   mode: string // 全自动 AI 生成
   durMode: 'auto' | 'manual'
   targetDur?: number
+  shotStyle?: string
 }
 
 export interface Segment {
   id: string
   no: number
   title: string
-  dur?: number // 段落目标时长（秒）
+  dur?: number // 段落时长（秒），拆解完成后必有值；镜头按它设计
   text: string // 原文
   scene?: string // 场景（截图里多为占位 —）
   roles?: string // 出场角色
@@ -39,7 +40,17 @@ export interface Asset {
   roles?: string[]
 }
 
+export interface VideoReferenceImage {
+  assetId: string
+  name: string
+  kind: Asset['kind']
+  imageUrl: string
+  label: string // @图片1
+}
+
 export interface VideoVersion {
+  videoPrompt?: string // 生成时的提示词快照；历史版本可能没有
+  referenceImages?: VideoReferenceImage[] // 生成时的参考图快照
   tag: string // v1
   preferred: boolean
   url?: string
@@ -54,7 +65,7 @@ export interface ShotVideo {
   stale?: boolean // 镜头被重新生成后，旧视频标记为需重新生成
 }
 
-export type OutdatedKind = 'segText' | 'segDur' | 'asset' | 'shotEdit'
+export type OutdatedKind = 'segText' | 'asset'
 export interface OutdatedReason {
   kind: OutdatedKind
   key?: string
@@ -62,13 +73,14 @@ export interface OutdatedReason {
 }
 
 export interface Shot {
+  assetIds?: string[] // 加载旧数据时补齐；兼容只读方案页样本
   segId: string
   dur: number
   outdated?: OutdatedReason[]
   id: string
   no: number
   shot: string // 画面描述
-  timeline: string // 时间安排（每行一条）
+  timeline: string // 画面节奏（按顺序编号，每行一拍）
   action: string // 主要动作
   anchor: string // 场景位置
   motion: string // 动作说明
@@ -88,7 +100,8 @@ export interface Project {
   createdAt: number
   updatedAt: number
   // 只为未迁移的只读方案页样本保留旧结构；工作流加载时统一迁移。
-  config: ProjectConfig | { segDur: number; ratio: string; style: string; mode: string; durMode?: never; targetDur?: never }
+  config: ProjectConfig | { segDur: number; ratio: string; style: string; mode: string; durMode?: never; targetDur?: never; shotStyle?: never }
+  /** @deprecated No longer used; cleared on migration. */
   assetsHint?: boolean
   balance: number // 星钻余额（全局共享，这里挂项目上便于扣减演示）
   script: string
@@ -103,7 +116,7 @@ export interface Project {
 // 分镜字段的中文标签与分组（编辑抽屉/快照复用）
 export const SHOT_FIELDS: { key: keyof Shot; label: string }[] = [
   { key: 'shot', label: '画面描述' },
-  { key: 'timeline', label: '时间安排' },
+  { key: 'timeline', label: '画面节奏' },
   { key: 'action', label: '主要动作' },
   { key: 'anchor', label: '场景位置' },
   { key: 'motion', label: '动作说明' },

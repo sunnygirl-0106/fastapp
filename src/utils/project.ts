@@ -1,5 +1,5 @@
 import { clampDuration } from '@/data/duration'
-import { SHOT_FIELDS, type Asset, type Project, type Shot, type ShotVideo, type VideoVersion } from '@/types'
+import { SHOT_FIELDS, type Asset, type Project, type Segment, type Shot, type ShotVideo, type VideoVersion } from '@/types'
 
 /* ---------- 镜头视频版本 ----------
    一个镜头可以有多个版本（v1/v2/…），旧版本永远保留。
@@ -92,50 +92,90 @@ export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
 export const fmtDur = (d: number | string | undefined) => d === undefined ? '待分配' : `${parseInt(String(d), 10)} 秒`
 
 
-// 演示用：保留节拍内容，按新时长平均分配整数秒；真实 AI 自行组织节拍。
-export function buildTimeline(beats: string[], dur: number): string {
-  const clean = beats.map((b) => b.replace(/^\s*\d+\s*[–—-]\s*\d+\s*秒[：:]\s*/, '').trim()).filter(Boolean)
-  if (!clean.length) clean.push('保持当前画面与动作')
-  const count = dur <= 4 ? 1 : Math.min(clean.length, dur)
+// 画面节奏只表达先后顺序，不随镜头时长变化。
+export function buildBeats(lines: string[]): string {
+  const clean = lines.map((line) => line.replace(/^(?:\s*(?:\d+\s*[–—-]\s*\d+\s*秒\s*[：:]|[①-⑩]))+\s*/, '').trim()).filter(Boolean)
+  if (!clean.length) return '① 保持当前画面与动作'
+  const count = Math.min(5, clean.length)
   return Array.from({ length: count }, (_, i) => {
     const text = clean.slice(Math.floor(i * clean.length / count), Math.floor((i + 1) * clean.length / count)).join('；')
-    return `${Math.round(i * dur / count)}–${Math.round((i + 1) * dur / count)}秒：${text}`
+    return `${'①②③④⑤'[i]} ${text}`
   }).join('\n')
 }
 
-export const remainingDuration = (p: Project) => (p.config.targetDur ?? 60) - p.shots.reduce((sum, shot) => sum + (p.segments.find((seg) => seg.id === shot.segId)?.dur ?? shot.dur), 0)
-
-export function allocateShotDurations(p: Project, segs: Project['segments']): Map<string, number> {
-  const fresh = segs.filter((seg) => !p.shots.some((shot) => shot.segId === seg.id))
-  const result = new Map<string, number>()
-  if (p.config.durMode === 'manual' && fresh.length) {
-    const budget = remainingDuration(p)
-    const weights = fresh.map((seg) => seg.text.length)
-    const total = weights.reduce((a, b) => a + b, 0)
-    const exact = weights.map((w) => budget * (total ? w / total : 1 / fresh.length))
-    const rounded = exact.map(Math.floor)
-    const order = exact.map((v, i) => ({ i, fraction: v - rounded[i] })).sort((a, b) => b.fraction - a.fraction)
-    const remainder = budget - rounded.reduce((a, b) => a + b, 0)
-    order.slice(0, remainder).forEach(({ i }) => rounded[i]++)
-    fresh.forEach((seg, i) => result.set(seg.id, clampDuration(rounded[i])))
-  } else {
-    fresh.forEach((seg) => result.set(seg.id, Math.min(15, clampDuration(seg.text.length / 6))))
+// Bounded proportional allocation. Find the scale after clamping, then use
+// largest remainders so rounding preserves the exact integer total.
+export function allocateExact(total: number, weights: number[], min = 4, max = 30): number[] {
+  if (!weights.length) return []
+  if (!Number.isInteger(total) || total < weights.length * min || total > weights.length * max) {
+    throw new RangeError('Target duration is outside the feasible range')
   }
-  segs.forEach((seg) => {
-    const old = p.shots.find((shot) => shot.segId === seg.id)
-    if (old) result.set(seg.id, seg.dur ?? old.dur)
-  })
+  const positive = weights.map((w) => Math.max(1, w))
+  const bounded = (scale: number) => positive.map((w) => Math.min(max, Math.max(min, w * scale)))
+  let lo = 0, hi = total
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2
+    if (bounded(mid).reduce((a, b) => a + b, 0) < total) lo = mid
+    else hi = mid
+  }
+  const exact = bounded(lo)
+  const rounded = exact.map((v) => Math.floor(v))
+  const order = exact.map((v, i) => ({ i, fraction: v - rounded[i] })).sort((a, b) => b.fraction - a.fraction || a.i - b.i)
+  let remaining = total - rounded.reduce((a, b) => a + b, 0)
+  for (const { i } of order) if (remaining && rounded[i] < max) { rounded[i]++; remaining-- }
+  return rounded
+}
+
+// Preserve source order and punctuation while balancing contiguous chunks.
+export function splitSegmentText(text: string, count: number): string[] {
+  let chunks = text.split(/(?<=[。！？…])/u).filter(Boolean)
+  if (chunks.length < count) chunks = chunks.flatMap((s) => s.split(/(?<=[，；])/u).filter(Boolean))
+  while (chunks.length < count) {
+    const i = chunks.reduce((best, s, j) => s.length > chunks[best].length ? j : best, 0)
+    if (!chunks[i] || chunks[i].length < 2) break
+    const mid = Math.ceil(chunks[i].length / 2)
+    chunks.splice(i, 1, chunks[i].slice(0, mid), chunks[i].slice(mid))
+  }
+  const groups: string[] = []
+  let start = 0, remaining = text.length
+  for (let i = 0; i < count; i++) {
+    const left = count - i
+    const target = remaining / left
+    let end = start + 1, length = chunks[start]?.length ?? 0
+    while (end < chunks.length - (left - 1) &&
+      Math.abs(length + chunks[end].length - target) <= Math.abs(length - target)) {
+      length += chunks[end++].length
+    }
+    if (left === 1) end = chunks.length
+    const group = chunks.slice(start, end).join('')
+    groups.push(group); remaining -= group.length; start = end
+  }
+  return groups
+}
+
+// 只分配传入的段落，其他段落已有时长占用预算但保持不变。
+export function allocateSegmentDurations(p: Project, segs: Segment[]): Map<string, number> {
+  const result = new Map<string, number>()
+  if (!segs.length) return result
+  if (p.config.durMode === 'manual') {
+    const ids = new Set(segs.map((seg) => seg.id))
+    const budget = Math.max(0, (p.config.targetDur ?? 60)
+      - p.segments.reduce((sum, seg) => sum + (ids.has(seg.id) ? 0 : seg.dur ?? 0), 0))
+    // Existing manual edits can leave an infeasible remaining budget during
+    // migration; preserve those edits and clamp only the missing allocation.
+    const feasible = Math.min(segs.length * 30, Math.max(segs.length * 4, budget))
+    const durations = allocateExact(feasible, segs.map((seg) => seg.text.length))
+    segs.forEach((seg, i) => result.set(seg.id, durations[i]))
+  } else {
+    segs.forEach((seg) => result.set(seg.id, Math.min(15, clampDuration(seg.text.length / 6))))
+  }
   return result
 }
 
 export const outdatedShots = (p: Project) => p.shots.filter((s) => s.outdated?.length)
 export const ungeneratedSegments = (p: Project) => p.segments.filter((s) => !p.shots.some((shot) => shot.segId === s.id))
 export function shotsReferencingAsset(p: Project, a: Asset): Shot[] {
-  return p.shots.filter((s) => {
-    const seg = p.segments.find((x) => x.id === s.segId)
-    return SHOT_FIELDS.some(({ key }) => String(s[key] ?? '').includes(a.name)) ||
-      !!seg?.text.includes(a.name) || (a.kind === 'scene' && !!seg && !!a.belongSegs?.includes(seg.no))
-  })
+  return p.shots.filter((s) => s.assetIds?.includes(a.id))
 }
 
 export function renameOccurrences(p: Project, name: string) {
