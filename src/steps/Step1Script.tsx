@@ -58,12 +58,12 @@ export default function Step1Script({ project, locked }: { project: Project; loc
   const chars = text.trim().length
 
   // 关键：取消 pending 的防抖并立即 flush，再置状态 + 切页 + 生成
-  const handleConfirm = (durMode: 'auto' | 'manual', targetDur: number) => {
+  const handleConfirm = (durMode: 'auto' | 'manual', targetDur: number, style: string) => {
     if (t.current) clearTimeout(t.current)
     setScript(text)
     setStatus('saved')
     setConfirm(false)
-    startSegments(durMode, targetDur)
+    startSegments(durMode, targetDur, style)
   }
 
   return (

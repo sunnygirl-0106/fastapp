@@ -197,4 +197,5 @@ export function renameOccurrences(p: Project, name: string) {
 export function shotGenerationBlocked(p: Project): string | undefined {
   if (p.shotStatus === 'generating') return '正在生成镜头，完成后可操作'
   if (p.assetStatus === 'generating') return '正在生成角色与场景，完成后可操作'
+  if (!p.shots.length && (!p.assets.length || p.assets.some(a => a.imgState !== 'done' || !a.imageUrl))) return '请先补齐全部参考图'
 }

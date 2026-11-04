@@ -44,10 +44,9 @@ export default function GenShotModal({
   initialSelection?: number[]
   project: Project
   onClose: () => void
-  onConfirm: (segNos: number[], durations: Record<string, number>, style: string) => void
+  onConfirm: (segNos: number[], durations: Record<string, number>) => void
 }) {
   const segs = project.segments
-  const [style, setStyle] = useState(project.config.shotStyle ?? '')
   const [model, setModel] = useState<string>(MODELS.text)
   const [draft, setDraft] = useState(() => {
     const pending = segs.filter((seg) => { const shot = project.shots.find((s) => s.segId === seg.id); return !shot || shot.outdated?.length })
@@ -88,17 +87,7 @@ export default function GenShotModal({
             <ModelSelect value={model} options={MODEL_OPTIONS.text} onChange={setModel} variant="field-dark" width="100%" />
           </div>
 
-          {/* 风格参考（可选） */}
-          <div className="space-y-2">
-            <div className="text-sm text-white/60">风格参考（可选）</div>
-            <textarea
-              rows={3}
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder="风格、光影、色调、材质、美术笔触、画面氛围等相关描述"
-              className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-sm leading-relaxed text-white/90 outline-none placeholder:text-white/40 focus:border-brand/40"
-            />
-          </div>
+          {project.config.shotStyle && <p className="text-sm text-white/60">风格参考：{project.config.shotStyle}（在拆解剧本时设定）</p>}
 
           {/* 选择要生成镜头的段落 */}
           <div className="space-y-2">
@@ -188,7 +177,7 @@ export default function GenShotModal({
               取消
             </button>
             <button
-              onClick={() => onConfirm(sel, Object.fromEntries(segs.filter((seg) => sel.includes(seg.no)).map((seg) => [seg.id, durations.get(seg.id)!])), style)}
+              onClick={() => onConfirm(sel, Object.fromEntries(segs.filter((seg) => sel.includes(seg.no)).map((seg) => [seg.id, durations.get(seg.id)!])))}
               disabled={!sel.length}
               style={CTA_GRADIENT}
               className="h-10 rounded-full px-6 text-sm font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"

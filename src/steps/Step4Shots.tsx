@@ -434,9 +434,9 @@ export default function Step4Shots({ project }: { project: Project }) {
           project={project}
           initialSelection={initialSelection}
           onClose={() => setGenOpen(false)}
-          onConfirm={(segNos, durations, style) => {
+          onConfirm={(segNos, durations) => {
             setGenOpen(false)
-            startShots(segNos, durations, style)
+            startShots(segNos, durations)
           }}
         />
       )}

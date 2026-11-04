@@ -202,9 +202,9 @@ export default function Step3Assets({ project }: { project: Project }) {
         <GenShotModal
           project={project}
           onClose={() => setShotOpen(false)}
-          onConfirm={(segNos, durations, style) => {
+          onConfirm={(segNos, durations) => {
             setShotOpen(false)
-            startShots(segNos, durations, style)
+            startShots(segNos, durations)
           }}
         />
       )}

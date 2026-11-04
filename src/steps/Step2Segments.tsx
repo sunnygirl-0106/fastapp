@@ -139,7 +139,7 @@ export default function Step2Segments({ project }: { project: Project }) {
         onNext={() => goStep(3)}
       />
 
-      {redoOpen && <SegmentConfirmModal project={project} mode="redo" onClose={() => setRedoOpen(false)} onConfirm={(mode, target) => { setRedoOpen(false); restartSegments(mode, target) }} />}
+      {redoOpen && <SegmentConfirmModal project={project} mode="redo" onClose={() => setRedoOpen(false)} onConfirm={(mode, target, style) => { setRedoOpen(false); restartSegments(mode, target, style) }} />}
       {/* 新增剧本段落弹窗 */}
       {addOpen && <AddSegModal nextNo={segs.length + 1} onClose={() => setAddOpen(false)} onAdd={addSegment} />}
 

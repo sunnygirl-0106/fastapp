@@ -8,6 +8,9 @@ import { clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration
 import { buildAssetImagePrompt } from '@/data/assetTemplates'
 import { parseSegments, parseAssets, parseShots, formatTimeline, timelineLines } from '@/services/parse'
 import { mockSegments, mockAssets, mockShots } from '@/services/mockText'
+import { getPromptBook, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from '@/services/prompts'
+import { validatedText, TextModelError } from '@/services/textModel'
+import { cleanScript, splitPreface } from '@/services/validation'
 import { buildVideoPrompt, videoReferenceImages } from '@/services/videoPrompt'
 
 const LS_KEY = 'phanthy.projects.v2'
@@ -29,9 +32,10 @@ function queueShotReason(p: Project, segIds: string[], reason: OutdatedReason) {
 }
 function beginShots(p: Project, segIds: string[]) {
   const projectId = p.id
-  const ordinals = p.segments.filter((seg) => segIds.includes(seg.id)).map((seg) => seg.no)
-  const requested = parseShots(mockShots(p, ordinals).text, p, ordinals)
-  generatingAssetIds.set(projectId, new Map(requested.map((shot) => [shot.segId, shot.assetIds ?? []])))
+  generatingAssetIds.set(projectId, new Map(segIds.map(id => {
+    const seg = p.segments.find(s => s.id === id)!
+    return [id, [...new Set([...p.assets.filter(a => a.belongSegs?.includes(seg.no)).map(a => a.id), ...(p.shots.find(s => s.segId === id)?.assetIds ?? [])])]]
+  })))
   generatingSegIds.set(projectId, new Set(segIds))
   pendingShotReasons.set(projectId, new Map())
 }
@@ -96,10 +100,10 @@ interface State {
   dismissVideoStale: (shotId: string) => void
 
   // 确认即推进：先置 generating、再切页、最后跑生成
-  startSegments: (durMode?: 'auto' | 'manual', targetDur?: number) => Promise<void> // Step1 → Step2
-  restartSegments: (durMode: 'auto' | 'manual', targetDur?: number) => Promise<void>
+  startSegments: (durMode?: 'auto' | 'manual', targetDur?: number, style?: string) => Promise<void> // Step1 → Step2
+  restartSegments: (durMode: 'auto' | 'manual', targetDur?: number, style?: string) => Promise<void>
   startAssets: () => Promise<void> // Step2 → Step3
-  startShots: (segNos: number[], durations?: Record<string, number>, style?: string) => Promise<void> // Step3 → Step4
+  startShots: (segNos: number[], durations?: Record<string, number>) => Promise<void> // Step3 → Step4
   startVideos: (shotIds: string[]) => Promise<void> // Step4 → Step5
 }
 
@@ -236,90 +240,147 @@ export const useStore = create<State>((set, get) => {
   let toastT: ReturnType<typeof setTimeout> | null = null
 
   /* ---------- 生成过程的「后半段」，供 generate* 与 start* 复用 ---------- */
+  const snapshot = (id: string | null) => JSON.parse(JSON.stringify(get().projects.find(p => p.id === id))) as Project
+  const message = (error: unknown) => error instanceof Error ? error.message : '生成失败'
   const finishSegments = async (projectId: string | null) => {
-    await delay(1600)
-    let count = 0
-    patchProject((p) => {
-      p.balance -= COST.segGen
-      p.segments = parseSegments(mockSegments(p).text, p.config.durMode ?? 'auto', p.config.targetDur)
-      count = p.segments.length
-      p.segStatus = 'done'
-    }, projectId)
-    get().showToast(`已生成 ${count} 个剧本段落`)
+    const input = snapshot(projectId)
+    try {
+      if (!__REAL_TEXT__) await delay(1600)
+      const request = { system: getPromptBook().systems[1], user: buildSegmentUserMessage(input) }
+      const segments = await validatedText(request, () => mockSegments(input).text, text => parseSegments(text, input.config.durMode ?? 'auto', input.config.targetDur, input.script))
+      patchProject(p => {
+        p.balance -= COST.segGen
+        p.segments = segments
+        p.scriptPreface = splitPreface(segments, cleanScript(input.script)) ?? ''
+        p.segStatus = 'done'
+      }, projectId)
+      get().showToast(`已生成 ${segments.length} 个剧本段落`)
+    } catch (error) {
+      patchProject(p => { p.segStatus = p.segments.length ? 'done' : 'none' }, projectId)
+      if (get().currentId === projectId) set({ step: input.segments.length ? 2 : 1 })
+      get().showToast(`拆解失败：${message(error)}，本次未扣费`)
+    }
   }
 
   const finishAssets = async (projectId: string | null) => {
-    await delay(1600)
-    patchProject((p) => {
-      p.balance -= COST.assetExtract
-      // 保留已生成的参考图（若同名资产已存在图片）
-      const prev = new Map(p.assets.map((a) => [`${a.kind}:${a.name}`, a]))
-      p.assets = parseAssets(mockAssets(p).text).map((a) => {
-        const old = prev.get(`${a.kind}:${a.name}`)
-        return old && old.imgState === 'done' ? { ...a, imgState: 'done', imageUrl: old.imageUrl } : a
-      })
-      p.assetStatus = 'done'
-    }, projectId)
-    get().showToast('已提取 2 个角色、1 个场景')
+    const input = snapshot(projectId)
+    try {
+      if (!__REAL_TEXT__) await delay(1600)
+      const request = { system: getPromptBook().systems[2], user: buildAssetUserMessage(input.segments, input.scriptPreface, input.config.shotStyle) }
+      const assets = await validatedText(request, () => mockAssets(input).text, text => parseAssets(text, input.segments))
+      patchProject(p => {
+        const prev = new Map(p.assets.map(a => [`${a.kind}:${a.name}`, a]))
+        p.assets = assets.map(a => {
+          const old = prev.get(`${a.kind}:${a.name}`)
+          return old?.imgState === 'done' ? { ...a, imgState: 'done', imageUrl: old.imageUrl } : a
+        })
+        p.balance -= COST.assetExtract
+        p.assetStatus = 'done'
+      }, projectId)
+      get().showToast(`已提取 ${assets.filter(a => a.kind === 'char').length} 个角色、${assets.filter(a => a.kind === 'scene').length} 个场景`)
+    } catch (error) {
+      patchProject(p => { p.assetStatus = 'none' }, projectId)
+      if (get().currentId === projectId) set({ step: 2 })
+      get().showToast(`提取失败：${message(error)}，本次未扣费`)
+    }
   }
 
   const finishShots = async (segIds: string[], projectId: string) => {
-    await delay(1600)
-    patchProject((p) => {
-      const segs = p.segments.filter((s) => segIds.includes(s.id))
-      p.balance -= COST.shotGenEach * segs.length
-      const ordinals = segs.map((s) => s.no)
-      const parsed = parseShots(mockShots(p, ordinals).text, p, ordinals)
-      parsed.forEach((next) => {
-        const seg = segs.find((s) => s.id === next.segId)!
-        const old = p.shots.find((s) => s.segId === seg.id)
-        next.outdated = pendingShotReasons.get(p.id)?.get(seg.id) ?? []
-        if (old) p.shots[p.shots.indexOf(old)] = next
-        else p.shots.push(next)
-        markVideoStale(p, [next.id], '镜头已重新生成')
-      })
-      sortShots(p)
-      p.shotStatus = 'done'
-    }, projectId)
-    generatingAssetIds.delete(projectId)
-    generatingSegIds.delete(projectId)
-    pendingShotReasons.delete(projectId)
-    get().showToast(`已生成 ${segIds.length} 个镜头`)
+    const input = snapshot(projectId)
+    const targets = input.segments.filter(s => segIds.includes(s.id)).sort((a, b) => a.no - b.no)
+    let succeeded = 0, failed = 0, failure = ''
+    try {
+      if (!__REAL_TEXT__) await delay(1600)
+      for (let i = 0; i < targets.length; i += 6) {
+        const batch = targets.slice(i, i + 6), ordinals = batch.map(s => s.no)
+        try {
+          const existing = input.shots.filter(s => batch.some(seg => seg.id === s.segId))
+          const request = { system: getPromptBook().systems[3], user: buildShotUserMessage(input, ordinals, existing) }
+          const parsed = await validatedText(request, () => mockShots(input, ordinals).text, text => parseShots(text, input, ordinals))
+          patchProject(p => {
+            for (const next of parsed) {
+              const seg = p.segments.find(s => s.id === next.segId)
+              if (!seg) continue
+              const old = p.shots.find(s => s.segId === next.segId)
+              next.dur = seg.dur ?? next.dur
+              next.video = old?.video ?? next.video
+              next.assetIds = next.assetIds?.filter(id => p.assets.some(a => a.id === id))
+              next.outdated = pendingShotReasons.get(p.id)?.get(seg.id) ?? []
+              if (old) p.shots[p.shots.indexOf(old)] = next
+              else p.shots.push(next)
+              markVideoStale(p, [next.id], '镜头已重新生成')
+              p.balance -= COST.shotGenEach
+              succeeded++
+            }
+            sortShots(p)
+          }, projectId)
+          // Keep immutable original input, adding successful prior batches for adjacency.
+          input.shots = [...input.shots.filter(s => !batch.some(seg => seg.id === s.segId)), ...parsed]
+          for (const seg of batch) {
+            generatingSegIds.get(projectId)?.delete(seg.id)
+            generatingAssetIds.get(projectId)?.delete(seg.id)
+            pendingShotReasons.get(projectId)?.delete(seg.id)
+          }
+        } catch (error) {
+          failed += batch.length; failure = message(error)
+          // Stop immediately on budget refusal, including all not-yet-started batches.
+          if (error instanceof TextModelError && error.status === 402) { failed += targets.length - i - batch.length; break }
+        }
+      }
+    } finally {
+      patchProject(p => { p.shotStatus = p.shots.length ? 'done' : 'none' }, projectId)
+      generatingAssetIds.delete(projectId)
+      generatingSegIds.delete(projectId)
+      pendingShotReasons.delete(projectId)
+    }
+    get().showToast(failed ? `${succeeded ? `已生成 ${succeeded} 个镜头；` : ''}${failed} 个段落生成失败：${failure}，失败段落本次未扣费` : `已生成 ${succeeded} 个镜头`)
   }
 
   const finishVideos = async (shotIds: string[], projectId: string | null) => {
     const project = get().projects.find((p) => p.id === projectId)
     if (!project) return
-    const inputs = new Map(project.shots.filter((s) => shotIds.includes(s.id)).map((s) => [s.id, {
-      dur: s.dur, videoPrompt: buildVideoPrompt(s, project, s.dur), referenceImages: videoReferenceImages(s, project),
-    }]))
-    for (let i = 0; i < shotIds.length; i++) {
-      await delay(1200)
-      const id = shotIds[i]
-      patchProject((p) => {
-        const s = p.shots.find((x) => x.id === id)
-        if (s) {
-          s.video.state = 'done'
-          const reason = pendingVideoStale.get(p.id)?.get(id)
-          s.video.staleReason = reason
-          s.video.stale = !!reason
-          // 每次生成都追加一个新版本：已生成的视频是用户付费得来的资产，绝不覆盖
-          const n = s.video.versions.length
-          s.video.versions.forEach((v) => (v.preferred = false))
-          s.video.versions.push({
-            tag: `v${n + 1}`,
-            preferred: true,
-            url: mockImage(`镜头#${s.no}`, s.id, n),
-            createdAt: Date.now(),
-            ...inputs.get(id)!,
-          })
-          p.balance -= videoCost(inputs.get(id)!.dur)
-        }
-      }, projectId)
-      if (projectId) pendingVideoStale.get(projectId)?.delete(id)
+    try {
+      const inputs = new Map(project.shots.filter((s) => shotIds.includes(s.id)).map((s) => [s.id, {
+        dur: s.dur, videoPrompt: buildVideoPrompt(s, project, s.dur), referenceImages: videoReferenceImages(s, project),
+      }]))
+      for (let i = 0; i < shotIds.length; i++) {
+        await delay(1200)
+        const id = shotIds[i]
+        patchProject((p) => {
+          const s = p.shots.find((x) => x.id === id)
+          if (s) {
+            s.video.state = 'done'
+            const reason = pendingVideoStale.get(p.id)?.get(id)
+            s.video.staleReason = reason
+            s.video.stale = !!reason
+            // 每次生成都追加一个新版本：已生成的视频是用户付费得来的资产，绝不覆盖
+            const n = s.video.versions.length
+            s.video.versions.forEach((v) => (v.preferred = false))
+            s.video.versions.push({
+              tag: `v${n + 1}`,
+              preferred: true,
+              url: mockImage(`镜头#${s.no}`, s.id, n),
+              createdAt: Date.now(),
+              ...inputs.get(id)!,
+            })
+            p.balance -= videoCost(inputs.get(id)!.dur)
+          }
+        }, projectId)
+        if (projectId) pendingVideoStale.get(projectId)?.delete(id)
+      }
+      if (projectId && !pendingVideoStale.get(projectId)?.size) pendingVideoStale.delete(projectId)
+      get().showToast('视频已全部生成')
+    } catch (error) {
+      get().showToast(`视频生成失败：${message(error)}，失败视频本次未扣费`)
+    } finally {
+      patchProject(p => p.shots.forEach(shot => {
+        if (shotIds.includes(shot.id) && shot.video.state === 'generating') shot.video.state = shot.video.versions.length ? 'done' : 'none'
+      }), projectId)
+      if (projectId) {
+        shotIds.forEach(id => pendingVideoStale.get(projectId)?.delete(id))
+        if (!pendingVideoStale.get(projectId)?.size) pendingVideoStale.delete(projectId)
+      }
     }
-    if (projectId && !pendingVideoStale.get(projectId)?.size) pendingVideoStale.delete(projectId)
-    get().showToast('视频已全部生成')
   }
 
   return {
@@ -494,16 +555,24 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         p.assets.forEach((a) => { if (ids.includes(a.id)) a.imgState = 'generating' })
       })
-      // 逐张完成
-      for (let i = 0; i < ids.length; i++) {
-        await delay(900)
-        const id = ids[i]
-        patchProject((p) => {
-          const a = p.assets.find((x) => x.id === id)
-          if (a) { a.imgState = 'done'; a.imageUrl = mockImage(buildAssetImagePrompt(a), a.id + i); p.balance -= COST.assetImgEach; markVideoStale(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`) }
-        }, projectId)
+      try {
+        // 逐张完成
+        for (let i = 0; i < ids.length; i++) {
+          await delay(900)
+          const id = ids[i]
+          patchProject((p) => {
+            const a = p.assets.find((x) => x.id === id)
+            if (a) { console.info('[参考图提示词]', buildAssetImagePrompt(a, p)); a.imgState = 'done'; a.imageUrl = mockImage(buildAssetImagePrompt(a, p), a.id + i); p.balance -= COST.assetImgEach; markVideoStale(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`) }
+          }, projectId)
+        }
+        get().showToast(ids.length > 1 ? '参考图已全部生成' : '参考图已生成')
+      } catch (error) {
+        get().showToast(`参考图生成失败：${message(error)}，失败图片本次未扣费`)
+      } finally {
+        patchProject(p => p.assets.forEach(a => {
+          if (ids.includes(a.id) && a.imgState === 'generating') a.imgState = a.imageUrl ? 'done' : 'none'
+        }), projectId)
       }
-      get().showToast(ids.length > 1 ? '参考图已全部生成' : '参考图已生成')
     },
 
     clearAssetImage: (id) => {
@@ -604,11 +673,11 @@ export const useStore = create<State>((set, get) => {
       get().showToast('已保留当前视频')
     },
 
-    restartSegments: async (durMode, targetDur) => {
+    restartSegments: async (durMode, targetDur, style) => {
       const p = get().projects.find((p) => p.id === get().currentId)
       if (!p || p.segStatus !== 'done' || p.assetStatus !== 'none') return
       patchProject((p) => {
-        p.config = { ...p.config, durMode, targetDur: durMode === 'manual' ? clampTargetDuration(targetDur ?? 60) : undefined }
+        p.config = { ...p.config, shotStyle: style === undefined ? p.config.shotStyle : style.trim() || undefined, durMode, targetDur: durMode === 'manual' ? clampTargetDuration(targetDur ?? 60) : undefined }
         p.segStatus = 'generating'
       })
       set({ step: 2 })
@@ -616,11 +685,11 @@ export const useStore = create<State>((set, get) => {
     },
 
     /* ---------- 确认即推进：先置 generating，再切页，最后跑生成 ---------- */
-    startSegments: async (durMode = 'auto', targetDur) => {
+    startSegments: async (durMode = 'auto', targetDur, style) => {
       const projectId = get().currentId
       const p = get().projects.find((p) => p.id === projectId)
       if (!p || p.segStatus !== 'none') return
-      patchProject((p) => { p.config = { ratio: p.config.ratio, style: p.config.style, mode: p.config.mode, durMode, ...(durMode === 'manual' ? { targetDur: clampTargetDuration(targetDur ?? 60) } : {}) } })
+      patchProject((p) => { p.config = { ...p.config, shotStyle: style === undefined ? p.config.shotStyle : style.trim() || undefined, durMode, targetDur: undefined, ...(durMode === 'manual' ? { targetDur: clampTargetDuration(targetDur ?? 60) } : {}) } })
       patchProject((p) => { p.segStatus = 'generating' })
       set({ step: 2 })
       await finishSegments(projectId)
@@ -635,14 +704,13 @@ export const useStore = create<State>((set, get) => {
       await finishAssets(projectId)
     },
 
-    startShots: async (segNos, durations, style) => {
+    startShots: async (segNos, durations) => {
       const p = get().projects.find((p) => p.id === get().currentId)
       if (!p || shotGenerationBlocked(p)) return
       const segIds = p.segments.filter((s) => segNos.includes(s.no)).map((s) => s.id)
       const confirmedDurations = durations && Object.fromEntries(segIds.filter((id) => durations[id] !== undefined).map((id) => [id, clampDuration(durations[id])]))
       beginShots(p, segIds)
       patchProject((p) => {
-        if (style !== undefined) p.config.shotStyle = style.trim() || undefined
         p.shotStatus = 'generating'
         p.segments.forEach((seg) => {
           if (confirmedDurations?.[seg.id] !== undefined) seg.dur = confirmedDurations[seg.id]

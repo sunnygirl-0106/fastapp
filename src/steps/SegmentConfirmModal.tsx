@@ -8,8 +8,9 @@ export default function SegmentConfirmModal({ project, mode, onClose, onConfirm 
   project: Project
   mode: 'first' | 'redo'
   onClose: () => void
-  onConfirm: (mode: 'auto' | 'manual', target: number) => void
+  onConfirm: (mode: 'auto' | 'manual', target: number, style: string) => void
 }) {
+  const [style, setStyle] = useState(project.config.shotStyle ?? '')
   const [durMode, setDurMode] = useState<'auto' | 'manual'>(project.config.durMode ?? 'auto')
   const [targetDur, setTargetDur] = useState(String(project.config.targetDur ?? 60))
   const [flash, setFlash] = useState(false)
@@ -38,6 +39,7 @@ export default function SegmentConfirmModal({ project, mode, onClose, onConfirm 
         <div className="flex items-center gap-2"><label className="flex items-center gap-2"><input type="radio" name="durMode" checked={durMode === 'manual'} onChange={() => setDurMode('manual')} className="accent-brand" />指定</label>
           <input autoFocus={durMode === 'manual'} ref={targetRef} aria-label="目标成片时长" type="number" min={4} max={600} step={1} disabled={durMode !== 'manual'} value={targetDur} onChange={(e) => setTargetDur(e.target.value)} onBlur={normalizeTarget} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); normalizeTarget() } }} className={`h-8 w-[72px] rounded-lg bg-black/40 text-center text-sm outline-none focus:ring-1 focus:ring-brand disabled:opacity-40 ${flash ? 'text-red-400' : ''}`} />秒
         </div>
+        <label className="block space-y-2"><span>风格参考（可选）</span><textarea aria-label="风格参考" rows={3} value={style} onChange={e => setStyle(e.target.value)} placeholder="风格、光影、色调、材质、美术笔触、画面氛围等相关描述" className="w-full resize-none rounded-lg bg-black/40 p-3 outline-none focus:ring-1 focus:ring-brand" /></label>
         <p className="text-xs text-faint">本步把剧本拆成段落，并按原文长短给每段预分配时长，之后可随时调整。</p>
       </div>}
       cost={COST.segGen}
@@ -45,7 +47,7 @@ export default function SegmentConfirmModal({ project, mode, onClose, onConfirm 
       notice={mode === 'first' ? <>开始后「剧本」将锁定，仅供查看、不可再编辑</> : undefined}
       confirmText={mode === 'redo' ? '确认并重新拆解' : '确认并开始拆解'}
       onClose={onClose}
-      onConfirm={() => onConfirm(durMode, normalizeTarget())}
+      onConfirm={() => onConfirm(durMode, normalizeTarget(), style)}
     />
   )
 }

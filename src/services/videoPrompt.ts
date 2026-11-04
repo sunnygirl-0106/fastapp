@@ -1,30 +1,63 @@
-import type { Project, Shot, VideoReferenceImage } from '@/types'
-import { formatTimeline, timelineLines } from './parse'
-
-export function videoReferenceImages(shot: Shot, project: Project): VideoReferenceImage[] {
-  const refs = [...new Set(shot.assetIds ?? [])].flatMap((id) => {
-    const a = project.assets.find((asset) => asset.id === id)
-    return a?.imageUrl ? [{ assetId: a.id, name: a.name, kind: a.kind, imageUrl: a.imageUrl }] : []
+import type { Asset, Project, Shot, VideoReferenceImage } from '@/types'
+import { timelineLines } from './parse'
+import { getPromptBook } from './prompts'
+import { roundEven, SHOT_TEXT_FIELDS } from './validation'
+export const fmtSeconds = (value: number) => String(value)
+export function timeAxis(beats: string[], dur: number): [number, number, string][] {
+  if (!beats.length) return []
+  const minimums = beats.map(beat => {
+    const chars = [...beat.matchAll(/“([^”]*)”/g)].reduce((n, m) => n + [...m[1].replace(/\s/g, '')].length, 0)
+    return chars ? chars / 4 + 0.5 : 1.5
   })
-  return refs.map((ref, i) => ({ ...ref, label: `@图片${i + 1}` }))
+  const total = minimums.reduce((a, b) => a + b, 0)
+  const lengths = minimums.map(m => total <= dur ? m + (dur - total) / beats.length : m * dur / total)
+  const bounds = [0]
+  let cumulative = 0
+  lengths.slice(0, -1).forEach((length, i) => {
+    cumulative += length
+    bounds.push(Math.min(Math.max(roundEven(cumulative * 2) / 2, bounds[bounds.length - 1] + 0.5), dur - 0.5 * (beats.length - i - 1)))
+  })
+  bounds.push(dur)
+  return beats.map((beat, i) => [bounds[i], bounds[i + 1], beat])
 }
-
+export function paceHint(dur: number, beats: string[]) {
+  const per = dur / Math.max(beats.length, 1)
+  return per >= 6 ? '节奏舒缓，动作之间保留停顿和情绪留白，不要用多余的动作填满时间，' : per <= 2.5 ? '节奏紧凑，动作干脆连贯，不做多余停顿，' : '节奏自然流畅，'
+}
+export function replaceMentions(text: string, mapping: Record<string, string>) {
+  const names = Object.keys(mapping).sort((a, b) => b.length - a.length)
+  if (!names.length) return text
+  return text.replace(new RegExp('@(' + names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'g'), (_, name) => mapping[name])
+}
+export function videoReferenceImages(shot: Shot, project: Project): VideoReferenceImage[] {
+  return [...new Set(shot.assetIds ?? [])].flatMap(id => {
+    const a = project.assets.find(asset => asset.id === id)
+    return a?.imageUrl ? [{ assetId: a.id, name: a.name, kind: a.kind, imageUrl: a.imageUrl }] : []
+  }).map((ref, i) => ({ ...ref, label: `@图片${i + 1}` }))
+}
+export function buildReferenceImagePrompt(asset: Asset, project?: Project): string {
+  const desc = (asset.prompt.trim() || asset.desc).trim().replace(/[。，,.；;]+$/, '')
+  const style = project?.config.shotStyle?.trim() ?? ''
+  return getPromptBook().templates[asset.kind === 'char' ? 'A' : 'B']
+    .split('{prompt；为空时用 description}').join(desc).split('{name}').join(asset.name)
+    .split('\n').filter(line => style || !line.includes('{风格参考}')).map(line => line.split('{风格参考}').join(style)).join('\n')
+}
 export function buildVideoPrompt(shot: Shot, project: Project, dur: number): string {
   const refs = videoReferenceImages(shot, project)
-  const fields: [string, string | undefined][] = [
-    ['参考图', refs.map((a) => `${a.label} 为${a.kind === 'char' ? '角色' : '场景'}「${a.name}」`).join('，')],
-    ['画面描述', shot.shot],
-    ['画面节奏', formatTimeline(timelineLines(shot.timeline)).replace(/\n/g, ' ')],
-    ['主要动作', shot.action], ['场景位置', shot.anchor], ['动作说明', shot.motion],
-    ['走位说明', shot.blocking], ['画面主角', shot.subject], ['连贯要求', shot.continuity],
-    ['保持不变', shot.forbid], ['背景范围', shot.background], ['风格', project.config.shotStyle],
-  ]
-  return [
-    `本段总时长 ${dur} 秒。按下方画面节奏的顺序依次完成，节奏均匀分布在整段时长内，不跳过、不重复、不提前结束。`,
-    ...fields.flatMap(([label, value]) => value?.trim() ? [`${label}：${value.trim()}`] : []),
-    '人物一致性：画面中出现的人物，长相、发型、服装必须严格与对应的人物参考图一致，不得换脸、改发型、改服装或改变年龄感；空间结构以场景参考图为准。',
-    '移动约束：人物的身体朝向、脚步方向必须和前进的目的地一致，禁止倒着走、逆向滑步；除非剧情要求，不要为了露脸让人物转向镜头。',
-    '无字幕：画面中不得出现任何字幕、对白字卡、说明文字、水印和角标；对白只通过声音和口型表现。',
-    '音频：生成有声视频。对白按画面节奏中的原句、在对应的拍点由对应的人物说出，口型与说话时机一致；同时生成与场景和动作相符的环境声和动作音效。',
-  ].join('\n')
+  const mapping = Object.fromEntries(project.assets.map(a => [a.name, refs.find(r => r.assetId === a.id)?.label ?? a.name]))
+  const beats = timelineLines(shot.timeline).slice(0, 8).map(b => replaceMentions(b, mapping))
+  let axis = timeAxis(beats, dur).map(([a, b, beat]) => `${fmtSeconds(a)}–${fmtSeconds(b)}秒：${beat.replace(/[。；;]+$/, '')}`).join('；')
+  if (axis && !/[。！？”」]$/.test(axis)) axis += '。'
+  const values: Record<string, string | number> = { ...Object.fromEntries(SHOT_TEXT_FIELDS.map(k => [k, replaceMentions(shot[k].trim(), mapping)])), dur, '画幅': project.config.ratio, '时间轴': axis, '节奏提示': paceHint(dur, beats) }
+  return getPromptBook().templates.C.split('\n').flatMap(line => {
+    if (line.startsWith('风格：')) return [line.replace(/\{风格参考[^{}]*\}/g, () => project.config.shotStyle?.trim().replace(/。+$/, '') || '写实电影风格')]
+    if (line.startsWith('参考图：')) {
+      const samples = line.match(/@图片\d+[^，…\n]*\{name\}[^，…\n]*/g)
+      if (samples?.length !== 2) throw new Error('模板 C 的参考图行需要角色、场景两个示例')
+      return refs.length ? ['参考图：' + refs.map(r => samples[r.kind === 'char' ? 0 : 1].replace(/@图片\d+/, r.label).replace('{name}', () => r.name)).join('，') + '。'] : []
+    }
+    const keys = [...line.matchAll(/\{([^{}]+)\}/g)].map(m => m[1])
+    if (keys.some(k => values[k] === undefined || values[k] === '')) return []
+    return [line.replace(/\{([^{}]+)\}/g, (_, k) => String(values[k]))]
+  }).join('\n')
 }

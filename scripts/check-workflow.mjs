@@ -1,6 +1,9 @@
 // Run with: node scripts/check-workflow.mjs. Uses existing Vite/React/jsdom only.
 // Isolated localStorage and accelerated mock delays; never touches browser projects.
+process.env.PHANTHY_MOCK = '1'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createServer } from 'vite'
 import { JSDOM } from 'jsdom'
@@ -10,7 +13,7 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, l
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 const realTimeout = globalThis.setTimeout
 globalThis.setTimeout = (fn, ms, ...args) => realTimeout(fn, [900, 1200, 1400, 1600].includes(ms) ? 0 : ms, ...args)
-const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
+const server = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom' })
 const results = []
 try {
   const { useStore, migrateProjects } = await server.ssrLoadModule('/src/store/workflowStore.ts')
@@ -27,14 +30,19 @@ try {
   const p = () => state().projects.find((p) => p.id === state().currentId)
   const check = (name, fn) => { fn(); results.push(name); console.log(`PASS ${name}`) }
   const seed = structuredClone(state().projects[0])
+  seed.script = seed.segments.map(s=>s.text).join('')
+  const earlyMock = await server.ssrLoadModule('/src/services/mockText.ts')
+  const earlyParse = await server.ssrLoadModule('/src/services/parse.ts')
+  seed.shots = earlyParse.parseShots(earlyMock.mockShots(seed,[1,2,3]).text,seed,[1,2,3])
   const reset = (project = seed) => useStore.setState({ projects: [structuredClone(project)], currentId: project.id, step: 1, toast: null })
   state().createProject('验收隔离项目')
-  state().setScript('苏可与外卖员的故事')
+  state().setScript(seed.script)
   let work = state().startSegments('manual', 60)
   check('确认即推进：拆解', () => { assert.equal(state().step, 2); assert.equal(p().segStatus, 'generating'); assert.deepEqual(stepLocked(p()), [true, false, false, false, false]) })
   await work
   check('v5 1：拆解按字数分配 27/16/17 秒并保存目标', () => { assert.equal(p().config.durMode, 'manual'); assert.equal(p().config.targetDur, 60); assert.deepEqual(p().segments.map(s=>s.dur),[27,16,17]) })
   work = state().startAssets(); assert.equal(state().step, 3); assert.equal(p().assetStatus, 'generating'); await work
+  await state().generateAssetImages(p().assets.map(a=>a.id))
   work = state().startShots([1, 2, 3]); assert.equal(state().step, 4); assert.equal(p().shotStatus, 'generating'); await work
   check('v5：首次生成沿用段落时长且合计 60 秒', () => { assert.equal(p().shots.reduce((n,s)=>n+s.dur,0),60); assert.ok(new Set(p().shots.map(s=>s.dur)).size > 1); assert.ok(p().segments.every(seg=>seg.dur===p().shots.find(s=>s.segId===seg.id).dur)) })
   const id1 = p().shots[0].id
@@ -95,9 +103,9 @@ try {
   check('19/20：参考图按模板 A/B 使用用户描述并追加固定要求', () => {
     p().assets.forEach(a=>{
       const prompt=templates.buildAssetImagePrompt(a)
-      assert.ok(prompt.includes(a.prompt))
-      if(a.kind==='char') {assert.ok(prompt.includes('角色三视图参考图，纯白背景，横向布局。'));assert.ok(prompt.endsWith('无其他人物，无文字，无水印，无背景场景。'))}
-      else {assert.ok(prompt.startsWith('无人物空场景参考图。'));assert.ok(prompt.includes(`场景名：${a.name}。`));assert.ok(prompt.includes('同一部剧统一摄影体系：'))}
+      assert.ok(prompt.includes(a.prompt.replace(/[。，,.；;]+$/, '')))
+      if(a.kind==='char') assert.ok(prompt.includes('人物设定图排版'))
+      else {assert.ok(prompt.startsWith('场景设定图'));assert.ok(prompt.includes(`场景名：${a.name}。`));assert.ok(prompt.includes('不得出现任何人物'))}
     })
   })
   const legacy = structuredClone(seed); delete legacy.config.durMode; legacy.config.segDur=8
@@ -334,7 +342,7 @@ try {
   check('参考图回退：设定编辑无固定版式说明',()=>{assert.ok(!container.textContent.includes('出图版式'));assert.ok(container.textContent.includes('参考图描述'));assert.ok(container.querySelectorAll('textarea')[1].placeholder.includes('画面风格'))})
   // v3: 第 9 节验收，沿用真实组件事件和独立 store。
   await resetLive()
-  await act(async()=>{ state().createProject('成片时长验收'); state().setScript('测试剧本') })
+  await act(async()=>{ state().createProject('成片时长验收'); state().setScript(seed.script) })
   await mountLive('/src/steps/Step1Script.tsx',{locked:false})
   await click(buttons().find(b=>b.textContent.includes('拆解剧本')))
   let target=container.querySelector('input[aria-label="目标成片时长"]')
@@ -357,6 +365,7 @@ try {
     const rows=[...container.querySelectorAll('label')].filter(row=>row.querySelector('input[aria-label^="选择段落"]'))
     rows.forEach(row=>{const input=row.lastElementChild.querySelector('input[type="number"]');assert.ok(input);assert.equal(input.min,'4');assert.equal(input.max,'30');assert.equal(row.children.length,4);assert.ok(!row.textContent.includes('未生成'));assert.ok(!row.textContent.includes('待分配'));assert.ok(!row.textContent.includes('待更新'))})
   })
+  await act(async()=>{await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id))})
   // 手调为 8、24、28 秒，验证生成沿用段落值，8 -> 12 后正好 64 秒。
   await act(async()=>{state().updateSegment('s1',{text:'甲'.repeat(20),dur:8});state().updateSegment('s2',{text:'乙'.repeat(60),dur:24});state().updateSegment('s3',{text:'丙'.repeat(70),dur:28});await state().startShots([1,2,3])})
   await mountLive('/src/steps/Step4Shots.tsx',{},true)
@@ -401,7 +410,7 @@ try {
   check('v6 17：手改保留段落原文原因，既不新增也不清除',()=>{assert.deepEqual(p().shots[1].outdated,[{kind:'segText',text:'段落原文已修改'}]);assert.ok(button('待更新'));assert.ok(button('全部保留当前描述'));assert.equal(dots().length,1)})
   const versionsBeforeRegenerate=structuredClone(p().shots[1].video.versions)
   await click(button('待更新'));await click(button('✦50 重新生成'));await tick(20)
-  check('v6 17 / v3 8：重新生成使用手改内容、清除待更新、保留视频版本',()=>{assert.equal(p().shots[1].shot,'雨夜中的苏可手改');assert.equal(p().shots[1].action,'在雨中快步前行');assertNoShotDecision();assert.deepEqual(p().shots[1].video.versions,versionsBeforeRegenerate);assert.equal(p().shots[1].video.staleReason,'镜头已重新生成')})
+  check('v6 17 / v3 8：重新生成使用手改内容、清除待更新、保留视频版本',()=>{assert.ok(p().shots[1].shot.replace(/@/g,'').includes('雨夜中的苏可手改'));assert.equal(p().shots[1].action,'在雨中快步前行');assertNoShotDecision();assert.deepEqual(p().shots[1].video.versions,versionsBeforeRegenerate);assert.equal(p().shots[1].video.staleReason,'镜头已重新生成')})
   await act(async()=>{state().updateShot('sh2',{shot:'雨夜中的苏可二'});state().updateShot('sh2',{shot:'雨夜中的苏可三'});state().updateShot('sh2',{action:'冒雨前行'})})
   check('v6 / v3 7：多次改同字段、不同字段均不产生待更新原因',()=>{assertNoShotDecision();assert.equal(p().shots[1].video.staleReason,'镜头描述已修改')})
   await act(async()=>state().updateSegment('s2',{text:'再次修改原文'}))
@@ -427,7 +436,7 @@ try {
   const fields=(await server.ssrLoadModule('/src/types.ts')).SHOT_FIELDS
   const allEdits=Object.fromEntries(fields.map(({key})=>[key,key==='timeline'?'0–5秒：雨夜甲\n5–15秒：雨夜乙':`手改${key}雨夜`]))
   await act(async()=>{state().updateShot('sh2',allEdits);state().updateSegment('s2',{text:'变化的原文',dur:4});await state().generateShots([2])})
-  check('v5 17：4 秒重新生成保留所有文本与每一拍',()=>{const s=p().shots[1];fields.filter(f=>f.key!=='timeline').forEach(({key})=>assert.equal(s[key],allEdits[key]));assert.equal(s.timeline,'① 雨夜甲\n② 雨夜乙');assert.equal(s.dur,4);assert.equal(s.outdated.length,0)})
+  check('v5 17：4 秒重新生成保留所有文本与每一拍',()=>{const s=p().shots[1];fields.filter(f=>f.key!=='timeline').forEach(({key})=>key==='shot'?assert.ok(s[key].endsWith(allEdits[key])):assert.equal(s[key],allEdits[key]));assert.equal(s.timeline,'① 雨夜甲\n② 雨夜乙');assert.equal(s.dur,4);assert.equal(s.outdated.length,0)})
   await act(async()=>{state().updateSegment('s2',{dur:20});await state().regenerateShot('sh2')})
   await mount('/src/steps/VideoConfirmModal.tsx',{shots:[p().shots[1]],balance:10000,onClose(){},onConfirm(){}})
   check('v3 11：20 秒镜头默认 2.5 可确认',()=>{assert.ok(button('Seedance 2.5'));assert.equal(button('确认并生成 1 段视频').disabled,false)})
@@ -444,12 +453,12 @@ try {
   const scan=async(dir)=>{for(const entry of await readdir(dir,{withFileTypes:true})){if(entry.name==='proposal')continue;const path=`${dir}/${entry.name}`;if(entry.isDirectory())await scan(path);else if(/\.tsx?$/.test(entry.name)){const code=await readFile(path,'utf8');assert.ok(!code.split('\n').map(line=>line.split('//')[0]).join('\n').includes('分镜'),path);assert.ok(!code.includes('时间安排'),path)}}}
   await scan('src');check('v5 15：工作流界面无分镜与时间安排文案（排除方案页）',()=>{})
   await resetLive()
-  await act(async()=>{state().createProject('自动时长验收');state().setScript('自动剧本');await state().startSegments()})
+  await act(async()=>{state().createProject('自动时长验收');state().setScript(seed.script);await state().startSegments()})
   await mountLive('/src/steps/Step2Segments.tsx')
   check('v3 2：自动模式页头',()=>assert.ok(container.textContent.includes('共 3 个剧本段落 · 预计成片时长约 39 秒')))
   await mountLive('/src/steps/GenShotModal.tsx',{onClose(){},onConfirm(){}})
   check('v3 3：自动模式生成弹窗',()=>assert.ok(container.textContent.includes('成片时长：自动，按内容确定')))
-  await act(async()=>state().startShots([1,2,3]))
+  await act(async()=>{await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id));await state().startShots([1,2,3])})
   check('v3 自动分配：按字数除以 6，夹取 4–15 秒',()=>p().segments.forEach(seg=>assert.equal(seg.dur,Math.min(15,Math.max(4,Math.round(seg.text.length/6))))))
   await mountLive('/src/steps/Step4Shots.tsx')
   check('v3 自动模式镜头页头',()=>assert.ok(container.textContent.includes(`已生成 3 个镜头 · 预计成片时长约 ${p().shots.reduce((n,s)=>n+s.dur,0)} 秒`)))
@@ -461,7 +470,7 @@ try {
   const modalTotal = () => [...container.querySelectorAll('div')].find(el=>el.textContent.startsWith('成片时长：') && el.children.length===0)
   await resetLive()
   await act(async()=>{
-    state().createProject('v4 指定时长');state().setScript('逐段时长验收');await state().startSegments('manual',60);await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id))
+    state().createProject('v4 指定时长');state().setScript(seed.script);await state().startSegments('manual',60);await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id))
     state().updateSegment('s1',{text:'甲'.repeat(20),dur:8});state().updateSegment('s2',{text:'乙'.repeat(60),dur:24});state().updateSegment('s3',{text:'丙'.repeat(70),dur:28})
   })
   await mountLive('/src/steps/Step3Assets.tsx')
@@ -554,7 +563,7 @@ try {
   await nativeClick(durationRows()[3].querySelector('span.truncate'));await nativeClick(durationRows()[3].querySelector('span.truncate'))
   check('v5：勾选变化不重新分配任何行',()=>assert.deepEqual(durationValues(),[20,null,null,4]))
   await resetLive()
-  await act(async()=>{state().createProject('v4 自动时长');state().setScript('自动模式验收');await state().startSegments();await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id));state().updateSegment('s1',{text:'甲'.repeat(12)});state().updateSegment('s2',{text:'乙'.repeat(60)});state().updateSegment('s3',{text:'丙'.repeat(120)})})
+  await act(async()=>{state().createProject('v4 自动时长');state().setScript(seed.script);await state().startSegments();await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id));state().updateSegment('s1',{text:'甲'.repeat(12)});state().updateSegment('s2',{text:'乙'.repeat(60)});state().updateSegment('s3',{text:'丙'.repeat(120)})})
   await mountLive('/src/steps/Step2Segments.tsx')
   check('v5 13：自动页头合计 39 秒、三张卡片可调，改正文不重分配',()=>{assert.ok(container.textContent.includes('共 3 个剧本段落 · 预计成片时长约 39 秒'));assert.deepEqual([...container.querySelectorAll('input[type="number"]')].map(i=>Number(i.value)),[15,12,12])})
   await mountLive('/src/steps/Step3Assets.tsx');await openShots()
@@ -574,7 +583,7 @@ try {
   // v5: document acceptance flow, including Step2 previews and cross-page state.
   await resetLive()
   await act(async()=>{
-    state().createProject('v5 完整验收');state().setScript('拆解与时长联动验收')
+    state().createProject('v5 完整验收');state().setScript(seed.script)
     await state().startSegments('manual',60);await state().startAssets();await state().generateAssetImages(p().assets.map(a=>a.id))
   })
   const segmentValues = () => [...container.querySelectorAll('input[aria-label^="段落 "]')].map(i=>Number(i.value))
@@ -722,7 +731,7 @@ try {
   }
   await resetLive()
   for (const [target,count] of [[60,3],[120,4],[91,4],[300,10],[600,20],[8,2],[4,1]]) {
-    await act(async()=>{state().createProject(`v7 ${target} 秒`);state().setScript('样例');await state().startSegments('manual',target)})
+    await act(async()=>{state().createProject(`v7 ${target} 秒`);state().setScript(seed.script);await state().startSegments('manual',target)})
     check(`v7 1–4：${target} 秒拆为 ${count} 段且合计精确`,()=>{
       assert.equal(p().segments.length,count);assert.equal(p().segments.reduce((n,s)=>n+s.dur,0),target)
       assert.ok(p().segments.every(s=>Number.isInteger(s.dur)&&s.dur>=4&&s.dur<=30))
@@ -752,7 +761,7 @@ try {
       const parts=utils.splitSegmentText(text,5);assert.equal(parts.length,5);assert.ok(parts.every(Boolean));assert.equal(parts.join(''),text)
     }
   })
-  await act(async()=>{state().createProject('v7 自动');state().setScript('样例');await state().startSegments()})
+  await act(async()=>{state().createProject('v7 自动');state().setScript(seed.script);await state().startSegments()})
   check('v7 5：自动模式保持 3 段及 15/12/12 秒',()=>assert.deepEqual(p().segments.map(s=>s.dur),[15,12,12]))
   await mountLive('/src/steps/Step2Segments.tsx')
   await click(button('新增剧本段落'));await change(container.querySelector('input[placeholder]'),'新增九秒段落');await change(container.querySelector('textarea'),'新增原文')
@@ -933,13 +942,20 @@ try {
   check('v7 25：删除后段落保留，提示段落 02 尚未生成镜头',()=>{assert.equal(p().segments.length,3);assert.ok(!p().shots.some(s=>s.id==='sh2'));assert.ok(container.textContent.includes('段落 02 尚未生成镜头'))})
   await resetLive();await mountLive('/src/steps/Step4Shots.tsx');await openDelete()
   check('v7：无视频镜头删除确认不显示版本损失文案',()=>{assert.ok(container.textContent.includes('确定删除镜头 02 吗？对应段落会保留，之后可以重新生成镜头。'));assert.ok(!container.textContent.includes('个视频版本会一起删除'))})
-  await click(button('取消'));await click(button('重新生成镜头'));await change(container.querySelector('textarea'),'  冷色电影感  ');await click(button('生成全部（3）'));await tick(20)
+  await click(button('取消'))
+  await act(async()=>useStore.setState({projects:[{...structuredClone(seed),config:{...seed.config,shotStyle:'冷色电影感'}}]}))
   await click(button('重新生成镜头'))
-  check('v7 26：确认生成后按项目保存风格、再次打开预填',()=>{assert.equal(p().config.shotStyle,'冷色电影感');assert.equal(container.querySelector('textarea').value,'冷色电影感');assert.equal(JSON.parse(localStorage.getItem('phanthy.projects.v2')).find(x=>x.id===p().id).config.shotStyle,'冷色电影感')})
-  await change(container.querySelector('textarea'),'未确认草稿');await click(button('取消'));await act(async()=>state().regenerateShot('sh2'))
-  check('v7 26：取消不写风格、单镜头重生成保留项目风格',()=>assert.equal(p().config.shotStyle,'冷色电影感'))
-  await click(button('重新生成镜头'));await change(container.querySelector('textarea'),'   ');await click(button('生成全部（3）'));await tick(20)
-  check('v7 26：空白风格确认后清除保存值',()=>assert.equal(p().config.shotStyle,undefined))
+  check('v8：镜头弹窗只读展示已有风格，没有风格文本框',()=>{assert.equal(container.querySelector('textarea'),null);assert.ok(container.textContent.includes('风格参考：冷色电影感（在拆解剧本时设定）'))})
+  await click(button('取消'));await act(async()=>state().regenerateShot('sh2'))
+  check('v8：单镜头重生成保留项目风格',()=>assert.equal(p().config.shotStyle,'冷色电影感'))
+  await act(async()=>{state().createProject('风格入口验收');state().setScript(seed.script)})
+  await mountLive('/src/steps/Step1Script.tsx',{locked:false})
+  await click(buttons().find(b=>b.textContent.includes('拆解剧本')))
+  await change(container.querySelector('textarea[aria-label="风格参考"]'),'  3D 卡通  ')
+  await click(buttons().find(b=>b.textContent.includes('确认并')));await tick(20)
+  check('v8：第 1 步确认风格会去首尾空格并保存',()=>assert.equal(p().config.shotStyle,'3D 卡通'))
+  await act(async()=>state().restartSegments('auto',undefined,'   '))
+  check('v8：重新拆解空白风格保存为 undefined',()=>assert.equal(p().config.shotStyle,undefined))
   check('v7：迁移清除弃用 assetsHint，改回时长不清除 stale',()=>{
     const old=structuredClone(seed);old.assetsHint=true
     old.shots[0].video={state:'done',stale:true,staleReason:'时长改为 24 秒',versions:[{tag:'v1',dur:15,preferred:true,createdAt:1}]}
@@ -957,19 +973,22 @@ try {
     try { fn(); return warnings } finally { console.warn = savedWarn }
   }
   check('提示词：三段系统提示词与原文逐字一致（SHA-256）',()=>{
-    const expected={"_SEGMENT_JSONL_SYSTEM_PROMPT": "01c1420e0de03956b1c45077c4388514908a1ff9733be86addcba13d4cd7fab0", "_ASSET_JSONL_SYSTEM_PROMPT": "a75402677d188813aac7f4042a3c9abb39fa30eb3bc3a1372f0b4283cba61718", "_SHOT_JSONL_SYSTEM_PROMPT": "c9dd8307b256a7d24effde088ce0b60d57cf3d17be796c12d83e518be279bcfa"}
-    Object.entries(expected).forEach(([key,hash])=>assert.equal(createHash('sha256').update(prompts[key]).digest('hex'),hash))
+    const source=readFileSync('../测试提示词效果/全自动工作流提示词.md','utf8')
+    for(const key of ['_SEGMENT_JSONL_SYSTEM_PROMPT','_ASSET_JSONL_SYSTEM_PROMPT','_SHOT_JSONL_SYSTEM_PROMPT']) {
+      const expected=source.match(new RegExp(key+'\\s*=\\s*"""([\\s\\S]*?)"""'))[1]
+      assert.equal(createHash('sha256').update(prompts[key]).digest('hex'),createHash('sha256').update(expected).digest('hex'))
+    }
   })
   check('提示词：拆解用户消息包含模式、目标与原文，auto 目标留空',()=>{
     assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'auto'}}),'duration_mode：auto\ntarget_seconds：\n剧本：\n测试剧本')
     assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'manual',targetDur:62}}),'duration_mode：manual\ntarget_seconds：62\n剧本：\n测试剧本')
   })
   check('提示词：提取与镜头用户消息保留段号、别名、风格和手改字段',()=>{
-    assert.equal(prompts.buildAssetUserMessage(seed.segments),`剧本段落：\n${seed.segments.map(s=>`[${s.no}] ${s.text}`).join('\n')}`)
+    assert.ok(prompts.buildAssetUserMessage(seed.segments,'人物设定','暖光').includes('人物设定\n风格参考：暖光\n剧本段落：'))
     const project=structuredClone(seed);project.assets[1].alias='小可';project.config.shotStyle='暖光';project.shots[1].action='手改主要动作'
     const message=prompts.buildShotUserMessage(project,[2,3],[project.shots[1]])
     assert.ok(message.includes('本次需要生成镜头的段号：2,3'));assert.ok(message.includes('别名：小可'));assert.ok(message.includes('风格参考：暖光'));assert.ok(message.includes('手改主要动作'))
-    assert.ok(!prompts.buildShotUserMessage(project,[1]).includes('已有镜头'))
+    assert.ok(prompts.buildShotUserMessage(project,[1]).includes('相邻段落的已有镜头'))
   })
   check('JSONL：mock 三种响应均可逐行解析，拆解保留段数与 allocateExact 算法',()=>{
     for(const target of [4,8,60,91,120,301]) {
@@ -988,15 +1007,15 @@ try {
     assert.ok(mockText.mockAssets(seed).text.split('\n').every(line=>JSON.parse(line).type==='asset'))
     assert.deepEqual(mockText.mockShots(seed,[2,3]).text.split('\n').map(line=>JSON.parse(line).segment_ordinal),[2,3])
   })
-  check('JSONL：meta、连续段号、整数与范围、manual 总时长错误会 warn',()=>{
-    const response=protocol.jsonl([{type:'meta',duration_mode:'auto',total_seconds:50},{type:'segment',ordinal:2,title:'错号',text:'原文',duration_seconds:3.5},{type:'segment',ordinal:4,duration_seconds:31}])
-    const warnings=captureWarnings(()=>protocol.parseSegments(response,'manual',60))
-    for(const message of ['duration_mode','连续递增','4–30','total_seconds','目标时长']) assert.ok(warnings.some(w=>w.includes(message)),message)
-    assert.ok(captureWarnings(()=>protocol.parseSegments('{bad}\n[]\nnull','auto')).some(w=>w.includes('JSON 对象')))
-    assert.ok(captureWarnings(()=>protocol.parseSegments('{}','auto')).some(w=>w.includes('唯一的 meta')))
+  check('JSONL：格式、顺序和时长错误会拒绝；代码围栏可容错',()=>{
+    assert.throws(()=>protocol.parseSegments('{bad}\n[]\nnull','auto'),protocol.ValidationError)
+    assert.throws(()=>protocol.parseSegments('{}','auto'),protocol.ValidationError)
+    assert.throws(()=>protocol.parseSegments(protocol.jsonl([{type:'meta',duration_mode:'auto'},{type:'segment',ordinal:2,title:'错号',text:'正文',duration_seconds:3.5}]),'manual',60),protocol.ValidationError)
+    const response=mockText.mockSegments({...seed,config:{...seed.config,durMode:'auto'}})
+    assert.equal(protocol.parseSegments('```jsonl\n'+response.text+'\n```','auto',undefined,seed.script).length,3)
   })
   check('JSONL：资产字段映射包含 alias、importance 和角色/场景所属段落',()=>{
-    const assets=protocol.parseAssets(protocol.jsonl(['character','scene'].map((kind,i)=>({type:'asset',client_key:`test-${i}`,kind,name:'名称',alias:'别名',importance:'major',description:'设定',prompt:'图片描述',segment_ordinals:[1,3]}))))
+    const assets=protocol.parseAssets(protocol.jsonl(['character','scene'].map((kind,i)=>({type:'asset',client_key:`test-${i}`,kind,name:`名称${i}`,alias:'别名',importance:'major',description:'设定',prompt:'图片描述',segment_ordinals:[1,3]}))))
     assert.deepEqual(assets.map(a=>a.kind),['char','scene'])
     assets.forEach(a=>{assert.equal(a.alias,'别名');assert.equal(a.importance,'major');assert.equal(a.desc,'设定');assert.equal(a.prompt,'图片描述');assert.deepEqual(a.belongSegs,[1,3])})
   })
@@ -1004,18 +1023,16 @@ try {
     const rows=[2,3].map(no=>({...protocol.encodeShot(seed.shots[no-1],no),timeline:['甲','乙','丙','丁','戊','己'],asset_ids:['a2','s_scene1']}))
     const warnings=captureWarnings(()=>{
       const shots=protocol.parseShots(protocol.jsonl(rows),seed,[2,3])
-      assert.deepEqual(shots.map(s=>s.segId),['s2','s3']);assert.deepEqual(shots[0].assetIds,['a2','s_scene1'])
+      assert.deepEqual(shots.map(s=>s.segId),['s2','s3']);assert.deepEqual(shots[0].assetIds,seed.shots[1].assetIds)
       assert.equal(shots[0].timeline,'① 甲\n② 乙\n③ 丙\n④ 丁\n⑤ 戊\n⑥ 己')
     })
-    assert.deepEqual(warnings,[])
+    assert.ok(warnings.some(w=>w.includes('建议')))
   })
-  check('JSONL：额外、重复、遗漏段号及不存在的资产会 warn',()=>{
+  check('JSONL：额外、重复、遗漏段号拒绝；asset_ids 按 @ 顺序修正',()=>{
     const row=protocol.encodeShot(seed.shots[1],2)
-    const warnings=captureWarnings(()=>{
-      const shots=protocol.parseShots(protocol.jsonl([{...row,segment_ordinal:1},{...row,asset_ids:['missing','a2','a2']},row]),seed,[2,3])
-      assert.equal(shots.length,1);assert.deepEqual(shots[0].assetIds,['a2'])
-    })
-    for(const message of ['与请求不一致或重复','遗漏','不存在','不能重复']) assert.ok(warnings.some(w=>w.includes(message)),message)
+    assert.throws(()=>protocol.parseShots(protocol.jsonl([{...row,segment_ordinal:1},row,row]),seed,[2,3]),protocol.ValidationError)
+    const shots=protocol.parseShots(protocol.jsonl([{...row,asset_ids:['missing']}]),seed,[2])
+    assert.deepEqual(shots[0].assetIds,seed.shots[1].assetIds)
   })
   check('引用：仅按 assetIds 判断，不由名称或所属段落推断',()=>{
     const project=structuredClone(seed);project.shots.forEach(s=>s.assetIds=[])
@@ -1044,21 +1061,21 @@ try {
       const asset={...seed.assets[0],kind,prompt:'   ',desc:'独立完整设定'}
       const prompt=templates.buildAssetImagePrompt(asset)
       assert.ok(prompt.includes('独立完整设定'))
-      const marker=kind==='char'?'角色三视图参考图':'无人物空场景参考图'
+      const marker=kind==='char'?'人物设定图排版':'场景设定图'
       assert.equal(prompt.split(marker).length,2);assert.equal(asset.prompt,'   ')
     }
   })
   check('模板 C：时长与传入镜头时长一致，参考图按 ID 顺序编号',()=>{
     const shot={...seed.shots[0],dur:23,assetIds:['s_scene1','a2','missing']}
     const prompt=videoPrompts.buildVideoPrompt(shot,seed,shot.dur)
-    assert.ok(prompt.startsWith('本段总时长 23 秒。'));assert.ok(prompt.includes('参考图：@图片1 为场景「客厅」，@图片2 为角色「苏可」'))
+    assert.ok(prompt.includes('本段总时长 23 秒，'));assert.ok(prompt.includes('参考图：@图片1 为场景「客厅」，@图片2 为角色「苏可」'))
     assert.deepEqual(videoPrompts.videoReferenceImages(shot,seed).map(r=>r.assetId),['s_scene1','a2'])
   })
   check('模板 C：空字段整行跳过，保留逐字对白和固定约束',()=>{
     const shot={...seed.shots[0],assetIds:[],shot:' ',timeline:'① 苏可说："原句对白。"\n② 起身',action:'',anchor:' ',motion:'',blocking:'',subject:'',continuity:'',forbid:'',background:''}
     const prompt=videoPrompts.buildVideoPrompt(shot,{...seed,config:{...seed.config,shotStyle:' '}},4)
-    for(const label of ['参考图','画面描述','主要动作','场景位置','动作说明','走位说明','画面主角','连贯要求','保持不变','背景范围','风格']) assert.ok(!prompt.includes(`${label}：`),label)
-    assert.ok(prompt.includes('画面节奏：① 苏可说："原句对白。" ② 起身'));assert.ok(prompt.includes('无字幕：'));assert.ok(prompt.includes('音频：生成有声视频。'))
+    for(const label of ['参考图','画面描述','主要动作','场景位置','动作说明','走位说明','画面主角','连贯要求','保持不变','背景范围']) assert.ok(!prompt.includes(`${label}：`),label)
+    assert.ok(prompt.includes('秒：苏可说："原句对白。"'));assert.ok(prompt.includes('风格：写实电影风格'));assert.ok(prompt.includes('4秒：起身'));assert.ok(prompt.includes('音频：生成有声视频。'))
   })
   await resetLive()
   let firstInput
@@ -1078,19 +1095,19 @@ try {
   check('视频快照：新版本使用当前 22 秒和当前参考图，旧版本不变',()=>{
     const [v1,v2]=p().shots[0].video.versions
     assert.equal(v1.videoPrompt,v1Snapshot.videoPrompt);assert.deepEqual(v1.referenceImages,v1Snapshot.referenceImages)
-    assert.equal(v2.dur,22);assert.ok(v2.videoPrompt.startsWith('本段总时长 22 秒。'));assert.ok(v2.videoPrompt.includes('第二版动作'))
+    assert.equal(v2.dur,22);assert.ok(v2.videoPrompt.includes('本段总时长 22 秒，'));assert.ok(v2.videoPrompt.includes('第二版动作'))
     assert.equal(v2.referenceImages.find(r=>r.assetId==='a2').imageUrl,'data:image/png;base64,new')
   })
   await mountLive('/src/steps/Step5Video.tsx');await click(container.querySelector('button[title="更多"]'));await click(button('查看镜头信息'))
   check('视频信息 UI：展示采用版本提示词与参考图快照',()=>{
-    assert.ok(container.textContent.includes('视频提示词'));assert.ok(container.textContent.includes('本段总时长 22 秒。'));assert.ok(container.textContent.includes('生成时的参考图'));assert.ok(container.textContent.includes('新名字'))
+    assert.ok(container.textContent.includes('视频提示词'));assert.ok(container.textContent.includes('本段总时长 22 秒，'));assert.ok(container.textContent.includes('生成时的参考图'));assert.ok(container.textContent.includes('新名字'))
     assert.ok(container.querySelector('select[aria-label="视频信息版本"]'))
   })
   await change(container.querySelector('select[aria-label="视频信息版本"]'),'v1')
   check('视频信息 UI：切换版本显示生成时的时长、原名、原图与原提示词',()=>{
-    assert.ok(container.textContent.includes('时长：15 秒'));assert.ok(container.textContent.includes('本段总时长 15 秒。'))
+    assert.ok(container.textContent.includes('时长：15 秒'));assert.ok(container.textContent.includes('本段总时长 15 秒，'))
     assert.ok([...container.querySelectorAll('img')].some(img=>img.alt.includes('苏可')&&img.getAttribute('src')===seed.assets[1].imageUrl))
-    assert.ok(!container.textContent.includes('本段总时长 22 秒。'))
+    assert.ok(!container.textContent.includes('本段总时长 22 秒，'))
   })
   await resetLive();await mountLive('/src/steps/Step3Assets.tsx')
   for(const kind of ['角色','场景']) {
@@ -1104,6 +1121,71 @@ try {
     check(`新增${kind} UI：输入后清空才显示名称不能为空`,()=>assert.ok(container.textContent.includes('名称不能为空')))
     await click(button('取消'))
   }
+
+  const validation = await server.ssrLoadModule('/src/services/validation.ts')
+  check('v8：4/15/30 秒时间轴首尾、连续、最短时长与对白权重',()=>{
+    const beats=['抬头。','小雨说：“明天我们一起去看海好吗？”','点头。']
+    for(const dur of [4,15,30]) {
+      const axis=videoPrompts.timeAxis(beats,dur)
+      assert.equal(axis[0][0],0);assert.equal(axis.at(-1)[1],dur)
+      axis.forEach(([a,b],i)=>{assert.ok(b-a>=0.5);if(i)assert.equal(a,axis[i-1][1])})
+      assert.ok(axis[1][1]-axis[1][0]>axis[0][1]-axis[0][0])
+    }
+    assert.equal(videoPrompts.timeAxis(['甲','乙'],6.5)[0][1],3)
+  })
+  check('v8：@ 长名称优先、缺图降为普通名称、编号与图片列表一致',()=>{
+    assert.equal(videoPrompts.replaceMentions('@小雨妈妈与@小雨',{'小雨':'@图片2','小雨妈妈':'@图片1'}),'@图片1与@图片2')
+    const project=structuredClone(seed);project.assets[0].name='小雨';project.assets[1].name='小雨妈妈';delete project.assets[0].imageUrl
+    const shot={...project.shots[0],assetIds:[project.assets[0].id,project.assets[1].id,project.assets[2].id],shot:'@小雨妈妈和@小雨在@客厅'}
+    const prompt=videoPrompts.buildVideoPrompt(shot,project,15)
+    assert.ok(prompt.includes('画面描述：@图片1和小雨在@图片2'))
+    assert.deepEqual(videoPrompts.videoReferenceImages(shot,project).map(r=>r.label),['@图片1','@图片2'])
+  })
+  check('v8：fix_total 全部可达合计、范围与 Python 舍入行为',()=>{
+    for(let count=1;count<=20;count++) for(let target=count*4;target<=count*30;target++) {
+      const durations=Array.from({length:count},(_,i)=>4+(i*7)%27),fixed=validation.fixTotal(durations,target)
+      assert.equal(fixed.reduce((a,b)=>a+b,0),target);assert.ok(fixed.every(n=>Number.isInteger(n)&&n>=4&&n<=30))
+    }
+    assert.equal(validation.roundEven(2.5),2);assert.equal(validation.roundEven(3.5),4)
+    assert.throws(()=>validation.fixTotal([10],31))
+  })
+  check('v8：剧本设定识别、对白中的原文秒数豁免、未知引用拒绝',()=>{
+    assert.equal(validation.splitPreface([{text:'正文。'}],'人物小传\n正文。'),'人物小传\n')
+    assert.equal(validation.splitPreface([{text:'改写。'}],'人物小传\n正文。'),null)
+    assert.equal(validation.timingInstructions('小雨说：“等我十秒。”','小雨：等我十秒。'),'小雨说：')
+    const row=protocol.encodeShot(seed.shots[0],1)
+    assert.throws(()=>protocol.parseShots(protocol.jsonl([{...row,shot:'@不存在的角色在@客厅'}]),seed,[1]))
+    assert.throws(()=>protocol.parseShots(protocol.jsonl([{...row,timeline:['停留十秒','转身']}]),seed,[1]))
+  })
+  check('v8：资产跨类型重名、场景遗漏和非法段号会拒绝',()=>{
+    const rows=mockText.mockAssets(seed).text.split('\n').map(JSON.parse)
+    assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.map((r,i)=>({...r,name:i===rows.length-1?rows[0].name:r.name}))),seed.segments))
+    assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.filter(r=>r.kind!=='scene')),seed.segments))
+    assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.map(r=>({...r,segment_ordinals:[999]}))),seed.segments))
+  })
+  check('v8：用户输入中的美元替换符不会改写原文',()=>{
+    const text="台词：$&、$`、$'"
+    assert.ok(prompts.buildSegmentUserMessage({...seed,script:text}).endsWith(text))
+    assert.ok(prompts.buildAssetUserMessage([{...seed.segments[0],text}],text,text).includes(text))
+    const project={...seed,segments:[{...seed.segments[0],text}],config:{...seed.config,shotStyle:text}}
+    assert.ok(prompts.buildShotUserMessage(project,[1]).includes(text))
+  })
+  check('v8：文档解析错误指出缺少的章节，模板 A/B 风格可省略',()=>{
+    assert.throws(()=>new prompts.PromptBook('缺少章节'),/SEGMENT/)
+    const plain=videoPrompts.buildReferenceImagePrompt(seed.assets[0],seed)
+    assert.ok(!plain.includes('画面风格：'))
+    assert.ok(videoPrompts.buildReferenceImagePrompt(seed.assets[0],{...seed,config:{...seed.config,shotStyle:'3D 卡通'}}).includes('画面风格：3D 卡通'))
+  })
+  check('v8：源码和构建产物无密钥，生产构建无费用角标',()=>{
+    const env=(()=>{try{return readFileSync('.env.local','utf8')}catch{return ''}})()
+    const key=env.match(/^OPENROUTER_API_KEY=(.+)$/m)?.[1]?.trim()
+    const files=dir=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(join(dir,e.name)):[join(dir,e.name)])
+    for(const path of [...files('src'),...files('server'),...files('scripts'),...files('dist'),'vite.config.ts']) {
+      const content=readFileSync(path)
+      assert.ok(!key || !content.includes(Buffer.from(key)), '检测到密钥泄露：'+path)
+      if(path.startsWith('dist/')) assert.ok(!content.includes(Buffer.from('已花 $')), '生产构建包含费用角标')
+    }
+  })
 
   await act(async()=>root.unmount());root=undefined
   console.log(`\n${results.length} checks passed.`)

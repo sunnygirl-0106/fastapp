@@ -1,3 +1,4 @@
+import { cleanScript, mentions } from './validation'
 import type { Project, Segment, Shot } from '@/types'
 import { sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
 import { buildBeats, allocateSegmentDurations, splitSegmentText } from '@/utils/project'
@@ -14,21 +15,20 @@ export function mockSegments(project: Project) {
   const samples = sampleSegments()
   const target = p.config.targetDur ?? 60
   const n = p.config.durMode === 'manual' ? Math.max(Math.ceil(target / 30), Math.min(3, Math.floor(target / 4))) : 3
-  if (n === 3) p.segments = samples.map(({ dur: _dur, ...s }) => s)
-  else if (n < 3) p.segments = samples.slice(0, n).map((seg, i) => ({
-    ...seg, dur: undefined, text: i === n - 1 ? samples.slice(i).map((s) => s.text).join('') : seg.text,
-  }))
-  else p.segments = splitSegmentText(samples.map((s) => s.text).join(''), n).map((text, i) => ({
-    id: uid('seg'), no: i + 1, title: `${text.slice(0, 10)}…`, text,
-  }))
+  const script = cleanScript(project.script)
+  // Use contiguous slices of the actual script, so mock obeys the same coverage check.
+  const sampleText = samples.map(s => s.text).join('')
+  const texts = script.replace(/\s/g, '') === sampleText.replace(/\s/g, '') && n === 3
+    ? samples.map(s => s.text) : splitSegmentText(script, n)
+  p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: samples[i]?.title ?? `剧本段落${i + 1}`, text }))
   const durations = allocateSegmentDurations(p, p.segments)
   p.segments.forEach((seg) => { seg.dur = durations.get(seg.id)! })
   return { request, text: encodeSegments(p.segments, p.config.durMode ?? 'auto', p.config.targetDur ?? 60) }
 }
 
 export function mockAssets(p: Project) {
-  const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments) }
-  const assets = sampleAssets().map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name)).map((seg) => seg.no) }))
+  const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments, p.scriptPreface, p.config.shotStyle) }
+  const assets = sampleAssets().map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name)).map((seg) => seg.no) })).filter(a => a.belongSegs.length).map(a => ({ ...a, prompt: a.kind === 'scene' ? a.desc : a.prompt }))
   return { request, text: encodeAssets(assets) }
 }
 
@@ -44,15 +44,15 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
   const originalText = sampleSegments().find((s) => s.id === seg.id)?.text
   const base = old ?? (originalText === seg.text ? sample : undefined)
   const dur = seg.dur ?? DUR_DEFAULT
-  const refs = p.assets.filter((a) => seg.text.includes(a.name) || (a.kind === 'scene' && a.belongSegs?.includes(seg.no)))
+  const refs = p.assets.filter((a) => old?.assetIds?.includes(a.id) || seg.text.includes(a.name) || a.belongSegs?.includes(seg.no))
+  if (!refs.some(a => a.kind === 'scene')) { const scene = p.assets.find(a => a.kind === 'scene'); if (scene) refs.push(scene) }
   const scene = refs.find((a) => a.kind === 'scene')
-  const beats = seg.text.split(/(?<=[。！？])/).filter(Boolean)
   const shot: Shot = {
     assetIds: [...new Set([...(old?.assetIds ?? []).filter((id) => p.assets.some((a) => a.id === id)), ...refs.map((a) => a.id)])],
     id: old?.id ?? uid('shot'), segId: seg.id, no: seg.no, dur,
     shot: base?.shot ?? seg.text,
     timeline: base && !/\d+\s*[–—-]\s*\d+\s*秒/.test(base.timeline) && timelineLines(base.timeline).length <= 6
-      ? formatTimeline(timelineLines(base.timeline)) : buildBeats(base?.timeline.split('\n') ?? beats),
+      ? formatTimeline(timelineLines(base.timeline)) : base ? buildBeats(base.timeline.split('\n')) : formatTimeline(['镜头建立人物与场景的位置关系。', '完成本段动作，保持前后衔接。']),
     action: base?.action ?? seg.text,
     anchor: base?.anchor ?? scene?.name ?? '当前段落场景',
     motion: base?.motion ?? seg.text,
@@ -63,5 +63,13 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
     background: base?.background ?? (refs.map((a) => `${a.name}：${a.desc}；${a.prompt}`).join('；') || '按段落原文呈现场景'),
     done: true, outdated: [], video: old?.video ?? { state: 'none', versions: [] },
   }
+  const names = p.assets.map(a => a.name).sort((a, b) => b.length - a.length)
+  const pattern = new RegExp('(?<!@)(' + names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'g')
+  for (const key of ['shot', 'timeline', 'action', 'anchor', 'motion', 'blocking', 'continuity', 'subject', 'forbid', 'background'] as const) {
+    if (names.length) shot[key] = shot[key].replace(pattern, '@$1')
+  }
+  const missing = refs.filter(a => !mentions(shot.shot, names).found.includes(a.name))
+  if (missing.length) shot.shot = missing.map(a => '@' + a.name).join('、') + '。' + shot.shot
+  if (timelineLines(shot.timeline).length < 2) shot.timeline = formatTimeline([timelineLines(shot.timeline)[0] || '镜头呈现当前场景。', '动作完成，保持画面连贯。'])
   return shot
 }

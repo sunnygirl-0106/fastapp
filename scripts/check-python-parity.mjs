@@ -1,0 +1,34 @@
+process.env.PHANTHY_MOCK='1'
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { createServer } from 'vite'
+const result=spawnSync('python3',['-c',String.raw`
+import sys,json
+sys.path.insert(0,'../测试提示词效果')
+from prompts import PromptBook,time_axis,pace_hint,replace_mentions
+from validation import fix_total,clean_script,timing_instructions
+book=PromptBook()
+beats=['抬头。','小雨说：“明天我们一起去看海好吗？”','点头。']
+segments=[dict(ordinal=1,title='走进房间',duration_seconds=15,text='小雨走进房间。')]
+assets=[dict(asset_id='a',kind='character',name='小雨',alias='',description='年轻女子',prompt='蓝色衣服。'),dict(asset_id='b',kind='scene',name='房间',alias='',description='明亮房间',prompt='')]
+shot=dict(type='shot',segment_ordinal=1,shot='@小雨在@房间',timeline=beats,action='抬头',anchor='@房间窗边',motion='无明显位移',blocking='左侧',subject='@小雨',continuity='站位不变',forbid='禁止新增人物',background='木门',asset_ids=['a','b'])
+print(json.dumps(dict(systems=book.systems,users=book.users,templates=book.templates,segments=segments,assets=assets,shot=shot,segmentUser=book.segment_user('正文','manual',15),assetUser=book.asset_user(segments,'人物设定','3D 卡通'),shotUser=book.shot_user(segments,assets,'3D 卡通',existing=[shot],targets=[1]),stitched=book.stitch(segments,assets,[shot],'3D 卡通','9:16 竖屏'),axes=[time_axis(beats,n) for n in [4,15,30]],hints=[pace_hint(n,beats) for n in [4,15,30]],fixed=[fix_total([8,13,21],n) for n in range(12,91)],clean=clean_script('# **人物**\n\\【正文\\】')) ,ensure_ascii=False))
+`],{encoding:'utf8'})
+assert.equal(result.status,0,result.stderr)
+const expected=JSON.parse(result.stdout)
+const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'})
+let count=0
+const check=(name,fn)=>{fn();count++;console.log('PASS Python parity: '+name)}
+try {
+ const prompts=await server.ssrLoadModule('/src/services/prompts.ts'),video=await server.ssrLoadModule('/src/services/videoPrompt.ts'),validation=await server.ssrLoadModule('/src/services/validation.ts'),parse=await server.ssrLoadModule('/src/services/parse.ts')
+ const project={config:{durMode:'manual',targetDur:15,shotStyle:'3D 卡通',ratio:'9:16 竖屏'},script:'正文',segments:expected.segments.map(s=>({id:'s'+s.ordinal,no:s.ordinal,title:s.title,text:s.text,dur:s.duration_seconds})),assets:expected.assets.map(a=>({id:a.asset_id,kind:a.kind==='character'?'char':'scene',name:a.name,alias:a.alias,desc:a.description,prompt:a.prompt,imageUrl:'image-'+a.asset_id})),shots:[]}
+ const shot={...expected.shot,id:'shot1',segId:'s1',no:1,dur:15,timeline:parse.formatTimeline(expected.shot.timeline),assetIds:['a','b']}
+ check('原文系统/用户模板/拼接模板',()=>{const book=prompts.getPromptBook();assert.deepEqual(book.systems,expected.systems);assert.deepEqual(book.users,expected.users);assert.deepEqual(book.templates,expected.templates)})
+ check('三次用户消息',()=>{assert.equal(prompts.buildSegmentUserMessage(project),expected.segmentUser);assert.equal(prompts.buildAssetUserMessage(project.segments,'人物设定','3D 卡通'),expected.assetUser)
+ // JSON whitespace is semantically irrelevant; the Python JSON encoder adds spaces.
+ const normalize=s=>s.split('\n').map(line=>{const i=line.indexOf('{');return i>=0?line.slice(0,i)+JSON.stringify(JSON.parse(line.slice(i))):line}).join('\n')
+ assert.equal(normalize(prompts.buildShotUserMessage(project,[1],[shot])),normalize(expected.shotUser))})
+ check('模板 A/B/C 成品逐字相等',()=>{assert.deepEqual(project.assets.map(a=>video.buildReferenceImagePrompt(a,project)),expected.stitched.references.map(r=>r.prompt));assert.equal(video.buildVideoPrompt(shot,project,15),expected.stitched.videos[0].prompt)})
+ check('时间轴/节奏/时长修正/Markdown 清理',()=>{assert.deepEqual([4,15,30].map(n=>video.timeAxis(expected.shot.timeline,n)),expected.axes);assert.deepEqual([4,15,30].map(n=>video.paceHint(n,expected.shot.timeline)),expected.hints);assert.deepEqual(Array.from({length:79},(_,i)=>validation.fixTotal([8,13,21],i+12)),expected.fixed);assert.equal(validation.cleanScript('# **人物**\n\\【正文\\】'),expected.clean)})
+ console.log(`${count} Python parity checks passed.`)
+} finally {await server.close()}

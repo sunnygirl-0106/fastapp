@@ -105,6 +105,7 @@ export interface Project {
   assetsHint?: boolean
   balance: number // 星钻余额（全局共享，这里挂项目上便于扣减演示）
   script: string
+  scriptPreface?: string
   segStatus: GenStatus
   assetStatus: GenStatus
   shotStatus: GenStatus
