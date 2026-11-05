@@ -19,7 +19,7 @@ export const SAMPLE_SCRIPT = `第一场
 
 动作：
 震动停止。
-苏可像土拨鼠一样从抱枕里探出头，确认安全。
+苏可从抱枕里探出头，左右张望。
 她如释重负地瘫倒，刚想闭眼。
 
 声音：
@@ -47,7 +47,7 @@ export function sampleSegments(): Segment[] {
       no: 2,
       title: '警报解除与突发门铃',
       dur: 15,
-      text: '震动停止。苏可像土拨鼠一样从抱枕里探出头，确认安全。她如释重负地瘫倒，刚想闭眼。声音："叮咚——"清脆的门铃声，在安静的房间里像防空警报。',
+      text: '震动停止。苏可从抱枕里探出头，左右张望。她如释重负地瘫倒，刚想闭眼。声音："叮咚——"清脆的门铃声，在安静的房间里像防空警报。',
     },
     {
       id: 's3',
@@ -69,7 +69,6 @@ export function sampleAssets(): Asset[] {
       belongSegs: [3],
       importance: 'minor',
       alias: '',
-      desc: '20–30岁男性，现代都市外卖骑手。体态偏瘦，因长期奔波略显疲惫。脸型瘦削，神情急躁。穿着标准的高饱和度（如亮黄色或蓝色）外卖骑手防风冲锋衣，材质带有轻微的反光和日常磨损感，头戴有透明面罩的骑手安全头盔。整体呈现出真实的现代都市打工人质感，符合其急躁催单的性格特征。',
       prompt:
         '一个20–30岁的男性外卖员。他体态偏瘦，脸型瘦削，神情急躁且略带疲惫。穿着亮黄色的宽松防风冲锋衣制服，衣服材质有真实的褶皱和轻微磨损感，头戴同色系的骑手安全头盔。',
       imgState: 'none',
@@ -81,7 +80,6 @@ export function sampleAssets(): Asset[] {
       belongSegs: [1, 2, 3],
       importance: 'major',
       alias: '',
-      desc: '24岁女性，资深宅女与吃货。体态匀称略带婴儿肥，圆润的鹅蛋脸，素颜，表情慵懒且生动。',
       prompt:
         '一个24岁的年轻女性，资深宅女。她体态微肉可爱，圆润的鹅蛋脸，素颜，表情慵懒且生动。她穿着一件超级宽松的浅灰色纯棉连帽卫衣，卫衣的帽子紧紧扣在头上，露出几缕略显凌乱的头发，下身穿宽松的居家裤。服装材质柔软厚实。',
       imgState: 'none',
@@ -92,9 +90,8 @@ export function sampleAssets(): Asset[] {
       name: '客厅',
       importance: 'minor',
       alias: '',
-      desc: '空景，无人物。现代都市单身公寓客厅，昏暗室内光线，窗帘紧闭。',
       prompt:
-        'Modern urban single apartment living room, dim indoor lighting, curtains tightly closed, revealing faint cool-toned skylight. In the midground to the right is a comfortable fabric sofa with several throw pillows scattered on it, showing obvious signs of use. A giant plush bear leans against the wall to the right rear of the sofa.',
+        '现代都市公寓客厅。紧闭的窗帘透入少量冷光。右侧布艺沙发摆着几个抱枕，沙发右后方靠墙放着一只大毛绒熊。',
       imgState: 'none',
       belongSegs: [1, 2, 3],
       roles: ['苏可', '外卖员'],
@@ -102,64 +99,46 @@ export function sampleAssets(): Asset[] {
   ]
 }
 
-// 分镜（截图：3 条，字段用截图真实文案）
+// 示例镜头使用可见动作与短句，所有资产引用与真实模型格式一致。
 export function sampleShots(): Shot[] {
+  const shared = {
+    dur: 15, done: true,
+    continuity: '@苏可的发型、卫衣帽子和服装不变。抱枕与沙发位置不变。',
+    forbid: '不新增人物，不打开窗帘，不改变家具位置。',
+    background: '@客厅窗帘紧闭。右侧是沙发，沙发后方靠墙放着大毛绒熊。',
+  }
   return [
     {
-      id: 'sh1',
-      segId: 's1',
-      dur: 15,
-      no: 1,
-      shot: '特写镜头，起幅包含苏可戴着卫衣帽子的面部与脚边闪烁的手机，随着她用脚趾踢手机的动作，镜头缓慢推向苏可面部（Push In），最终定格在她碎碎念的微表情上',
-      timeline:
-        '① 特写画面中，手机屏幕疯狂闪烁来电，苏可蜷缩在沙发里，卫衣帽子扣在头上，一脸视死如归。\n② 苏可用脚趾将手机踢到抱枕下面，手机在抱枕下闷声震动。\n③ 镜头缓慢推向苏可面部，她躲在帽子里碎碎念自我催眠，嘴唇微动。',
-      action: '蜷缩在沙发里，用脚趾把闪烁的手机踢到抱枕下，碎碎念自我催眠',
-      anchor: '沙发及抱枕区域',
-      motion: '苏可保持蜷缩姿态，仅腿部和脚趾发力将手机踢入抱枕下方，随后头部微缩进行碎碎念，无大范围空间位移',
-      blocking: '苏可始终蜷缩在沙发上，手机位于脚边的抱枕附近',
-      continuity: '苏可蜷缩在沙发的姿势，卫衣帽子扣在头上的状态，手机最终被隐藏在抱枕下的位置',
-      subject: '苏可逃避健身教练的连环夺命 call',
-      forbid: '禁止苏可摘下卫衣帽子，禁止手机离开抱枕下方',
-      background: '昏暗的客厅背景，窗帘紧闭，视觉聚焦于沙发区域',
-      done: true,
+      ...shared, id: 'sh1', segId: 's1', no: 1, assetIds: ['a2', 's_scene1'],
+      shot: '特写。@苏可蜷缩在@客厅沙发上，卫衣帽子扣在头上。手机在她脚边闪烁。她用脚趾踢开手机，镜头缓慢推向她的脸。',
+      timeline: '① @苏可蜷缩在沙发上，低头看向闪烁的手机。\n② 她用脚趾把手机踢进抱枕下面，手机继续震动。\n③ 镜头推近。她缩进卫衣帽子，嘴唇轻轻开合。',
+      action: '用脚趾把手机踢进抱枕下面，缩头低声说话。',
+      anchor: '@客厅右侧沙发。手机在脚边，抱枕贴着她的腿。',
+      motion: '@苏可保持蜷缩，只伸脚踢手机，再缩回腿。头部略微下沉。',
+      blocking: '@苏可位于画面右侧。手机从脚前滑到抱枕下。',
+      subject: '@苏可，卫衣帽子下露出脸部。',
       video: { state: 'none', versions: [] },
     },
     {
-      id: 'sh2',
-      segId: 's2',
-      dur: 15,
-      no: 2,
-      shot: '中近景起幅，锁定沙发区域，拍摄苏可探头和瘫倒的动作；在门铃声响起时轻微一顿',
-      timeline:
-        '① 手机震动停止，苏可像土拨鼠一样从抱枕里探出头，确认安全。\n② 她如释重负地瘫倒在沙发上，刚想闭眼。\n③ "叮咚——"清脆的门铃声突然响起，苏可身体一僵。',
-      action: '从抱枕下探出头确认安全，向后瘫倒，随后被门铃声惊吓',
-      anchor: '沙发及抱枕区域',
-      motion: '起点：苏可埋在抱枕下；路径：向上探出头确认安全，随后身体向后瘫倒在沙发',
-      blocking: '苏可位于客厅沙发上，身体被抱枕部分遮挡',
-      continuity: '苏可瘫倒在沙发上的位置与姿态，抱枕的相对位置，以及卫衣帽子状态',
-      subject: '苏可',
-      forbid: '禁止房间光线变亮，禁止窗帘打开，禁止外界强光',
-      background: '昏暗的客厅背景，窗帘紧闭，视觉聚焦于沙发区域',
-      done: true,
+      ...shared, id: 'sh2', segId: 's2', no: 2, assetIds: ['a2', 's_scene1'],
+      shot: '中近景。@苏可从@客厅沙发的抱枕后探出头，左右张望后向后躺下。门铃响起，她的肩膀突然绷紧。',
+      timeline: '① 手机停止震动。@苏可从抱枕后抬头，左右张望。\n② 她靠回沙发，肩膀下沉，眼睛慢慢合上。\n③ 门铃响起。她睁开眼，肩膀绷紧，头转向房门。',
+      action: '抬头张望，躺回沙发，听到门铃后转头。',
+      anchor: '@客厅右侧沙发。抱枕遮住她的腰部。',
+      motion: '@苏可上身抬起后向后靠回，头部随后朝房门转动。',
+      blocking: '@苏可始终在沙发上。房门位于画面左侧之外。',
+      subject: '@苏可的脸与肩膀。',
       video: { state: 'none', versions: [] },
     },
     {
-      id: 'sh3',
-      segId: 's3',
-      dur: 15,
-      no: 3,
-      shot: '快速跟摇镜头。起幅对准沙发上的苏可，随其移动快速跟摇，落幅定格在大毛绒熊后探出的苏可',
-      timeline:
-        '① 苏可从沙发上整个人原地弹起，动作敏捷，朝大毛绒熊方向移动。\n② 苏可迅速钻到大毛绒熊后面躲避。\n③ 门外传来外卖员的催单喊声。',
-      action: '苏可从沙发原地弹起，迅速钻到大毛绒熊后面躲避',
-      anchor: '大毛绒熊',
-      motion: '苏可从沙发迅速起身，身体和视线明确朝向大毛绒熊移动，最终完全躲在熊后',
-      blocking: '起点：沙发；终点：大毛绒熊后方',
-      continuity: '大毛绒熊在画面中的位置和大小，苏可完全躲在熊后的状态',
-      subject: '苏可',
-      forbid: '禁止大毛绒熊的位置和外观发生变化，禁止苏可完全离开画面',
-      background: '沙发区域与大毛绒熊所在区域',
-      done: true,
+      ...shared, id: 'sh3', segId: 's3', no: 3, assetIds: ['a2', 's_scene1', 'a1'],
+      shot: '快速跟摇镜头。@苏可从@客厅沙发上起身，钻到大毛绒熊后面。@外卖员在房门外喊话，画面保持室内机位。',
+      timeline: '① @苏可从沙发上站起，转向大毛绒熊。\n② 她快步移动到熊后，蹲下，只露出半张脸。\n③ @外卖员在门外喊话。她看向房门，抬手捂住嘴。',
+      action: '从沙发起身，快步躲到大毛绒熊后，蹲下捂嘴。',
+      anchor: '@客厅沙发右后方，靠墙的大毛绒熊旁。',
+      motion: '@苏可从沙发前沿向右后方移动，绕过熊的侧面后蹲下。',
+      blocking: '@苏可在熊后露出半张脸。@外卖员留在房门外，不进入室内。',
+      subject: '@苏可及遮挡她的大毛绒熊。',
       video: { state: 'none', versions: [] },
     },
   ]

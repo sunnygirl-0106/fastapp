@@ -1,4 +1,4 @@
-import { cleanScript, mentions } from './validation'
+import { cleanScript, mentions, fixTotal } from './validation'
 import type { Project, Segment, Shot } from '@/types'
 import { sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
 import { buildBeats, allocateSegmentDurations, splitSegmentText } from '@/utils/project'
@@ -22,13 +22,15 @@ export function mockSegments(project: Project) {
     ? samples.map(s => s.text) : splitSegmentText(script, n)
   p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: samples[i]?.title ?? `剧本段落${i + 1}`, text }))
   const durations = allocateSegmentDurations(p, p.segments)
-  p.segments.forEach((seg) => { seg.dur = durations.get(seg.id)! })
+  const values = [...durations.values()]
+  const fixed = fixTotal(values, p.config.durMode === 'manual' ? target : values.reduce((n, d) => n + Math.max(5, Math.round(d / 5) * 5), 0))
+  p.segments.forEach((seg, i) => { seg.dur = fixed[i] })
   return { request, text: encodeSegments(p.segments, p.config.durMode ?? 'auto', p.config.targetDur ?? 60) }
 }
 
 export function mockAssets(p: Project) {
   const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments, p.scriptPreface, p.config.shotStyle) }
-  const assets = sampleAssets().map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name)).map((seg) => seg.no) })).filter(a => a.belongSegs.length).map(a => ({ ...a, prompt: a.kind === 'scene' ? a.desc : a.prompt }))
+  const assets = sampleAssets().map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name)).map((seg) => seg.no) })).filter(a => a.belongSegs.length)
   return { request, text: encodeAssets(assets) }
 }
 
@@ -60,7 +62,7 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
     continuity: base?.continuity ?? '保持人物外观与场景结构一致',
     subject: base?.subject ?? (refs.filter((a) => a.kind === 'char').map((a) => a.name).join('、') || seg.title),
     forbid: base?.forbid ?? '不添加段落以外的人物与事件',
-    background: base?.background ?? (refs.map((a) => `${a.name}：${a.desc}；${a.prompt}`).join('；') || '按段落原文呈现场景'),
+    background: base?.background ?? (refs.map((a) => `${a.name}：${a.prompt}`).join('；') || '按段落原文呈现场景'),
     done: true, outdated: [], video: old?.video ?? { state: 'none', versions: [] },
   }
   const names = p.assets.map(a => a.name).sort((a, b) => b.length - a.length)

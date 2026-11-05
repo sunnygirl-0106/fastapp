@@ -5,6 +5,7 @@ export class ValidationError extends Error {
 }
 export const cleanScript = (text: string) => text.replace(/\r\n/g, '\n').replace(/\*\*|__/g, '').replace(/\\(?=[^\p{L}\p{N}_\s])/gu, '').replace(/^#{1,6}\s*/gm, '')
 const squash = (text: string) => text.replace(/\s+/g, '')
+export const comparable = (text: string) => squash(text.replace(/[“”„＂]/g, '"').replace(/[‘’＇]/g, "'"))
 export function parseJsonl(raw: string): Row[] {
   const errors: string[] = [], rows: Row[] = []
   let fenced = false
@@ -24,24 +25,49 @@ export function parseJsonl(raw: string): Row[] {
   return rows
 }
 export function splitPreface(segments: Row[], script: string): string | null {
-  const joined = squash(segments.map(s => typeof s.text === 'string' ? s.text : '').join(''))
-  if (!joined || !squash(script).endsWith(joined)) return null
+  const joined = comparable(segments.map(s => typeof s.text === 'string' ? s.text : '').join(''))
+  if (!joined || !comparable(script).endsWith(joined)) return null
   let count = 0, position = script.length
   while (position > 0 && count < joined.length) { position--; if (!/\s/.test(script[position])) count++ }
   return script.slice(0, position)
+}
+export function restoreTexts(segments: Row[], script: string, preface: string): number[] {
+  let position = preface.length
+  const changed: number[] = []
+  segments.forEach((seg, index) => {
+    const need = comparable(seg.text).length, start = position
+    if (index === segments.length - 1) position = script.length
+    else {
+      let count = 0
+      while (position < script.length && count < need) { if (!/\s/.test(script[position])) count++; position++ }
+      while (position < script.length && /\s/.test(script[position])) position++
+    }
+    const original = script.slice(start, position)
+    if (squash(original) !== squash(seg.text)) changed.push(seg.ordinal)
+    seg.text = original
+  })
+  return changed
 }
 // Python round uses ties-to-even, including for half-second boundaries.
 export const roundEven = (n: number) => n % 1 === 0.5 ? (Math.floor(n) % 2 ? Math.ceil(n) : Math.floor(n)) : Math.round(n)
 export function fixTotal(durations: number[], target: number): number[] {
   if (!Number.isInteger(target) || target < durations.length * 4 || target > durations.length * 30 || !durations.length) throw new ValidationError(['段落数量无法凑成目标时长（每段 4–30 秒）'])
   const total = durations.reduce((a, b) => a + b, 0)
-  const result = durations.map(d => Math.min(30, Math.max(4, roundEven(d * target / total))))
-  let diff = target - result.reduce((a, b) => a + b, 0)
+  const five = target >= 5 * durations.length
+  const base = five ? target - target % 5 : target
+  const unit = five ? 5 : 1, min = five ? 5 : 4
+  const result = durations.map(d => Math.min(30, Math.max(min, roundEven(d * base / total / unit) * unit)))
+  let diff = base - result.reduce((a, b) => a + b, 0)
   while (diff) {
-    const step = diff > 0 ? 1 : -1
+    const step = diff > 0 ? unit : -unit
     for (const i of result.map((_, i) => i).sort((a, b) => result[b] - result[a])) {
-      if (diff && result[i] + step >= 4 && result[i] + step <= 30) { result[i] += step; diff -= step }
+      if (diff && result[i] + step >= min && result[i] + step <= 30) { result[i] += step; diff -= step }
     }
+  }
+  if (five && target % 5) {
+    const remainder = target % 5
+    const i = result.map((_, i) => i).filter(i => result[i] + remainder <= 30).sort((a, b) => result[b] - result[a])[0]
+    result[i] += remainder
   }
   return result
 }
@@ -76,6 +102,10 @@ export function validateSegments(rows: Row[], script: string, mode: string, targ
   }
   if (rows[0].total_seconds !== total) notes.push(`meta.total_seconds 已改为段落合计 ${total}`)
   rows[0].total_seconds = total
+  const odd = segments.filter(s => s.duration_seconds % 5).map(s => s.ordinal)
+  if (odd.length > (mode === 'manual' && target! % 5 ? 1 : 0)) notes.push('以下段落时长不是 5 的倍数：' + odd.join('、'))
+  const changed = restoreTexts(segments, cleanScript(script), preface ?? '')
+  if (changed.length) notes.push('模型改动了以下段落的引号，已按剧本原文恢复：' + changed.join('、'))
   finish([], notes)
   return preface ?? ''
 }
@@ -89,7 +119,7 @@ export function validateAssets(rows: Row[], ordinals: number[]) {
     if (!['major', 'minor'].includes(r.importance)) errors.push(`${label}：importance 必须为 major / minor`)
     if (r.kind === 'scene') sceneSeen = true
     else if (r.kind === 'character' && sceneSeen) errors.push(`${label}：角色必须全部在场景之前`)
-    textFields(r, ['client_key', 'name', 'alias', 'description', 'prompt'], label, errors, ['alias', 'prompt'])
+    textFields(r, ['client_key', 'name', 'alias', 'prompt'], label, errors, ['alias'])
     for (const [value, seen, field] of [[r.client_key, keys, 'client_key'], [r.name, names, '名称']] as const) {
       if (typeof value === 'string') { if (seen.has(value)) errors.push(`${label}：${field} 重复`); seen.add(value) }
     }

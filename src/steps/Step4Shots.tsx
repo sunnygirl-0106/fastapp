@@ -1,8 +1,10 @@
-import VideoStaleChip from '@/components/VideoStaleChip'
+import OutdatedChip from '@/components/OutdatedChip'
+import MentionText from '@/components/MentionText'
+import { timelineLines, formatTimeline } from '@/services/parse'
 import DurationStepper from '@/components/DurationStepper'
 import NoticeBar from '@/components/NoticeBar'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
+import { Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
@@ -79,7 +81,6 @@ function HeadCheckbox({
 
 function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string } {
   if (v.state === 'generating') return { text: '正在生成视频', cls: 'text-amber-400', dot: 'bg-amber-400' }
-  if (v.state === 'done' && v.stale) return { text: '需重新生成', cls: 'text-amber-400', dot: 'bg-amber-400' }
   if (v.state === 'done') return { text: '视频已生成', cls: 'text-brand', dot: 'bg-brand' }
   return { text: '尚未生成视频', cls: 'text-faint', dot: 'bg-faint' }
 }
@@ -91,7 +92,7 @@ const DEFAULT_VISIBLE_FIELDS = SHOT_GROUPS.slice(0, 2).flatMap((g) => g.fields)
 
 // 按实际时间槽展示；容器 min-height 保持稳定行高。
 function parseTimeline(raw: string): string[] {
-  const lines = (raw ?? '').split('\n').map((l) => l.trim()).filter(Boolean)
+  const lines = formatTimeline(timelineLines(raw ?? '')).split('\n')
   return lines
 }
 
@@ -202,7 +203,7 @@ export default function Step4Shots({ project }: { project: Project }) {
   // 镜头生成完成后，默认选中所有尚未生成视频（或已失效）的镜头
   useEffect(() => {
     if (st !== 'done') return
-    setSel(shots.filter((s) => s.video.state === 'none' || s.video.stale).map((s) => s.id))
+    setSel(shots.filter((s) => !s.video.versions.length || s.outdated?.length).map((s) => s.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st, shots.length])
 
@@ -327,10 +328,9 @@ export default function Step4Shots({ project }: { project: Project }) {
       </div>
 
       {pending.length > 0 && <NoticeBar actions={[
-        { label: '全部保留当前描述', variant: 'text', onClick: () => useStore.getState().dismissAllOutdated() },
-        { label: `✦${COST.shotGenEach * pending.length} 全部重新生成`, variant: 'pill', disabled: !!blocked, title: blocked, onClick: () => openGeneration(project.segments.filter((seg) => pending.some((s) => s.segId === seg.id)).map((s) => s.no)) },
+        { label: '全部保留', variant: 'text', onClick: () => useStore.getState().dismissAllOutdated() },
       ]}>
-        {pending.length > 3 ? `镜头 ${pending.slice(0, 3).map((s) => no2(s.no)).join('、')} 等 ${pending.length} 个镜头` : pending.map((s) => `镜头 ${no2(s.no)}`).join('、')} 的上游内容有修改。如果只是改错别字这类不影响画面的修改，可以保留当前描述。
+        {pending.length} 个镜头待更新
       </NoticeBar>}
       {missing.length > 0 && <NoticeBar tone="neutral" action="去生成" disabled={!!blocked} title={blocked} onAction={() => openGeneration(missing.map((s) => s.no))}>{missing.length === 1 ? `段落 ${no2(missing[0].no)} 尚未生成镜头` : `${missing.length} 个段落尚未生成镜头`}</NoticeBar>}
       {/* 表格：统一深色表格（对齐设计稿）——列少自适应铺满、列多横向滚动 */}
@@ -512,6 +512,7 @@ export default function Step4Shots({ project }: { project: Project }) {
               onAdd={addFilter}
             />
             <FilterPreview
+              assets={project.assets}
               shots={shots}
               filters={filters}
               draftField={draftField}
@@ -595,9 +596,9 @@ function ShotRow({
         <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
         <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
-          {shot.video.stale && shot.video.state !== 'generating' ? <VideoStaleChip shot={shot} onRegenerate={onRegenerateVideo} /> : vi.text}
+          {vi.text}
         </span>
-        {!!shot.outdated?.length && <OutdatedChip shot={shot} project={project} />}
+        {!!shot.outdated?.length && <OutdatedChip shot={shot} project={project} onRegenerateVideo={onRegenerateVideo} />}
       </div>
 
       <ShotDurationCell project={project} shot={shot} onPreview={onDurationPreview} />
@@ -606,19 +607,19 @@ function ShotRow({
       {cols.map((c) => (
         <InlineCellEditor
           key={c.key}
-          value={String(shot[c.key] ?? '')}
+          value={c.key === 'timeline' ? timelineLines(shot.timeline).join('\n') : String(shot[c.key] ?? '')}
           onCommit={(v) => onCommit({ [c.key]: v } as Partial<Shot>)}
           readView={
             c.key === 'timeline' ? (
               <div className="min-h-[60px] space-y-1">
                 {parseTimeline(shot.timeline).map((line, i) => (
                   <div key={i} className="line-clamp-1 text-white/80">
-                    {line || ' '}
+                    <MentionText text={line || ' '} assets={project.assets} />
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="line-clamp-3 whitespace-pre-line">{String(shot[c.key] ?? '')}</div>
+              <div className="line-clamp-3 whitespace-pre-line"><MentionText text={String(shot[c.key] ?? '')} assets={project.assets} /></div>
             )
           }
         />
@@ -722,12 +723,14 @@ function highlightText(text: string, terms: string[]): React.ReactNode {
 
 /* ---------- 筛选实时预览：结合已加条件 + 当前草稿，实时列出命中镜头 ---------- */
 function FilterPreview({
+  assets,
   shots,
   filters,
   draftField,
   draftValue,
   onPick,
 }: {
+  assets: Project['assets']
   shots: Shot[]
   filters: { field: keyof Shot; value: string }[]
   draftField: keyof Shot
@@ -782,7 +785,7 @@ function FilterPreview({
                   <span className="text-[11.5px] text-white/40">{fmtDur(s.dur)}</span>
                 </div>
                 <div className="mt-2 line-clamp-2 text-[12.5px] leading-relaxed text-white/[0.62]">
-                  {snippet ? highlightText(snippet, terms) : '（该字段为空）'}
+                  {snippet ? <MentionText text={snippet} assets={assets} renderPlain={text => highlightText(text, terms)} /> : '（该字段为空）'}
                 </div>
               </button>
             )
@@ -973,31 +976,8 @@ function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }
 
 function snapshot(s: Shot): Record<string, string> {
   const o: Record<string, string> = {}
-  SHOT_FIELDS.forEach((f) => (o[f.key] = String(s[f.key] ?? '')))
+  SHOT_FIELDS.forEach((f) => (o[f.key] = f.key === 'timeline' ? timelineLines(s.timeline).join('\n') : String(s[f.key] ?? '')))
   return o
-}
-
-
-function OutdatedChip({ shot, project }: { shot: Shot; project: Project }) {
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
-  const blocked = shotGenerationBlocked(project)
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setAnchor(null) }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [])
-  return <>
-    <button className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-xs text-amber-300" title={`${shot.outdated?.map((r) => `· ${r.text}`).join('\n')}\n点击处理`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAnchor({ top: Math.min(r.bottom + 6, window.innerHeight - 310), left: r.left }) }}><AlertTriangle size={12} />待更新</button>
-    {anchor && <Popover anchor={anchor} width={300} onClose={() => setAnchor(null)}><div className="space-y-3 p-4">
-      <h3 className="text-sm font-medium">镜头 {no2(shot.no)} 需要更新</h3>
-      <div className="space-y-1 text-xs text-amber-300">{shot.outdated?.map((r) => <p key={`${r.kind}:${r.key ?? ''}`}>· {r.text}</p>)}</div>
-      <p className="text-xs leading-relaxed text-faint">重新生成会按最新内容改写这个镜头的描述；如果这次修改不影响画面（比如改了错别字），可以保留当前描述。</p>
-      <div className="flex flex-wrap justify-end gap-2">
-        <button className="rounded-full border border-white/20 px-3 py-2 text-xs" onClick={() => { useStore.getState().dismissOutdated(shot.id); setAnchor(null) }}>保留当前描述</button>
-        <button disabled={!!blocked} title={blocked} className="rounded-full bg-brand px-3 py-2 text-xs text-black disabled:opacity-40" onClick={() => { useStore.getState().regenerateShot(shot.id); setAnchor(null) }}>✦50 重新生成</button>
-      </div>
-    </div></Popover>}
-  </>
 }
 
 

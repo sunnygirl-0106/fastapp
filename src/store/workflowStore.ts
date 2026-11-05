@@ -3,7 +3,7 @@ import { SHOT_FIELDS, type Asset, type Project, type Shot, type Segment, type Ou
 import { COST, delay, mockImage, uid, videoCost } from '@/services/generation'
 import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
 
-import { buildBeats, preferredVersion, no2, shotsReferencingAsset, shotGenerationBlocked, allocateSegmentDurations } from '@/utils/project'
+import { buildBeats, no2, shotsReferencingAsset, shotGenerationBlocked, allocateSegmentDurations } from '@/utils/project'
 import { clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration'
 import { buildAssetImagePrompt } from '@/data/assetTemplates'
 import { parseSegments, parseAssets, parseShots, formatTimeline, timelineLines } from '@/services/parse'
@@ -11,6 +11,7 @@ import { mockSegments, mockAssets, mockShots } from '@/services/mockText'
 import { getPromptBook, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from '@/services/prompts'
 import { validatedText, TextModelError } from '@/services/textModel'
 import { cleanScript, splitPreface } from '@/services/validation'
+import { renameText, mentionParts } from '@/utils/mentions'
 import { buildVideoPrompt, videoReferenceImages } from '@/services/videoPrompt'
 
 const LS_KEY = 'phanthy.projects.v2'
@@ -19,17 +20,27 @@ const LS_KEY = 'phanthy.projects.v2'
 // repeat across projects. Nothing in these maps is persisted.
 const generatingSegIds = new Map<string, Set<string>>()
 const generatingAssetIds = new Map<string, Map<string, string[]>>()
-const pendingShotReasons = new Map<string, Map<string, OutdatedReason[]>>()
-const pendingVideoStale = new Map<string, Map<string, string>>()
+const pendingReasons = new Map<string, Map<string, OutdatedReason[]>>()
+const shotKey = (segId: string) => `shot:${segId}`
+const videoKey = (shotId: string) => `video:${shotId}`
+function queueReason(projectId: string, key: string, reason: OutdatedReason) {
+  if (!pendingReasons.has(projectId)) pendingReasons.set(projectId, new Map())
+  const pending = pendingReasons.get(projectId)!
+  pending.set(key, mergeReason(pending.get(key) ?? [], reason))
+}
+function clearPending(projectId: string, key: string) {
+  pendingReasons.get(projectId)?.delete(key)
+  if (!pendingReasons.get(projectId)?.size) pendingReasons.delete(projectId)
+}
 function mergeReason(reasons: OutdatedReason[], reason: OutdatedReason) {
-  return [...reasons.filter((r) => r.kind !== reason.kind || (r.kind === 'asset' && r.key !== reason.key)), reason]
+  return [...reasons.filter((r) => r.kind !== reason.kind || r.key !== reason.key), reason]
 }
 function queueShotReason(p: Project, segIds: string[], reason: OutdatedReason) {
-  const pending = pendingShotReasons.get(p.id)
-  segIds.forEach((id) => {
-    if (generatingSegIds.get(p.id)?.has(id)) pending?.set(id, mergeReason(pending.get(id) ?? [], reason))
+  segIds.forEach(id => {
+    if (generatingSegIds.get(p.id)?.has(id)) queueReason(p.id, shotKey(id), reason)
   })
 }
+
 function beginShots(p: Project, segIds: string[]) {
   const projectId = p.id
   generatingAssetIds.set(projectId, new Map(segIds.map(id => {
@@ -37,11 +48,7 @@ function beginShots(p: Project, segIds: string[]) {
     return [id, [...new Set([...p.assets.filter(a => a.belongSegs?.includes(seg.no)).map(a => a.id), ...(p.shots.find(s => s.segId === id)?.assetIds ?? [])])]]
   })))
   generatingSegIds.set(projectId, new Set(segIds))
-  pendingShotReasons.set(projectId, new Map())
-}
-function queueVideoReason(projectId: string, shotId: string, reason: string) {
-  if (!pendingVideoStale.has(projectId)) pendingVideoStale.set(projectId, new Map())
-  pendingVideoStale.get(projectId)!.set(shotId, reason)
+  segIds.forEach(id => clearPending(projectId, shotKey(id)))
 }
 function markAssetOutdated(p: Project, a: Asset, reason: OutdatedReason) {
   const refs = shotsReferencingAsset(p, a)
@@ -83,10 +90,10 @@ interface State {
   deleteSegment: (id: string) => void
 
   // step3 角色与场景
-  addAsset: (kind: Asset['kind'], fields: Pick<Asset, 'name' | 'desc' | 'prompt'>) => void
+  addAsset: (kind: Asset['kind'], fields: Pick<Asset, 'name' | 'prompt'>) => void
   generateAssetImages: (ids: string[]) => Promise<void>
   clearAssetImage: (id: string) => void
-  updateAsset: (id: string, patch: Partial<Asset>, options?: { silent?: boolean }) => void
+  updateAsset: (id: string, patch: Partial<Asset>) => void
   deleteAsset: (id: string) => void
 
   // step4 镜头
@@ -97,7 +104,6 @@ interface State {
 
   // step5 视频
   generateVideos: (shotIds: string[]) => Promise<void>
-  dismissVideoStale: (shotId: string) => void
 
   // 确认即推进：先置 generating、再切页、最后跑生成
   startSegments: (durMode?: 'auto' | 'manual', targetDur?: number, style?: string) => Promise<void> // Step1 → Step2
@@ -124,6 +130,11 @@ export function migrateProjects(projects: Project[]): Project[] {
     const { segDur: _legacy, ...config } = p.config as typeof p.config & { segDur?: number }
     p.config = { ...config, durMode: config.durMode ?? 'auto' }
     delete p.assetsHint
+    p.assets.forEach(a => {
+      const legacy = a as Asset & { desc?: string }
+      a.prompt = a.prompt?.trim() ? a.prompt : legacy.desc ?? ''
+      delete legacy.desc
+    })
     p.segments.forEach((seg) => {
       if (typeof seg.dur === 'string') seg.dur = parseInt(seg.dur, 10) || DUR_DEFAULT
     })
@@ -147,37 +158,37 @@ export function migrateProjects(projects: Project[]): Project[] {
         seg.dur ??= s.dur
         s.dur = seg.dur
       }
-      // localStorage may still contain removed duration or direct-edit reasons.
-      s.outdated = s.outdated?.filter((r) => !['segDur', 'shotEdit'].includes(r.kind))
-      syncDurationVideoStale(s)
+      s.outdated = (s.outdated ?? []).map(r => ['segDur', 'shotEdit'].includes(r.kind) ? { ...r, kind: 'video' as const } : r)
+      const legacy = s.video as typeof s.video & { stale?: boolean; staleReason?: string }
+      if (legacy.stale) s.outdated = mergeReason(s.outdated, { kind: 'video', key: 'legacy', text: legacy.staleReason || '视频不是最新的' })
+      delete legacy.stale
+      delete legacy.staleReason
     })
   })
   return backfillVersionTime(projects)
 }
 
-function retainShotDescription(shot: Shot) {
+function retainShot(shot: Shot) {
   shot.outdated = []
 }
 
-function syncDurationVideoStale(shot: Shot, projectId?: string) {
-  if (projectId && shot.video.state === 'generating') queueVideoReason(projectId, shot.id, `时长改为 ${shot.dur} 秒`)
-  const version = preferredVersion(shot.video)
-  if (version && version.dur !== shot.dur) {
-    shot.video.stale = true
-    shot.video.staleReason = `时长改为 ${shot.dur} 秒`
-  }
+function markDurationOutdated(shot: Shot, p: Project) {
+  markVideoOutdated(p, [shot.id], `时长改为 ${shot.dur} 秒`, 'duration')
 }
 
 function markOutdated(p: Project, ids: string[], reason: OutdatedReason) {
-  p.shots.filter((s) => ids.includes(s.id)).forEach((s) => {
+  p.shots.filter(s => ids.includes(s.id)).forEach(s => {
     s.outdated = mergeReason(s.outdated ?? [], reason)
     queueShotReason(p, [s.segId], reason)
+    if (s.video.state === 'generating') queueReason(p.id, videoKey(s.id), reason)
   })
 }
-function markVideoStale(p: Project, ids: string[], reason: string) {
-  p.shots.filter((s) => ids.includes(s.id)).forEach((s) => {
-    if (s.video.state === 'generating') queueVideoReason(p.id, s.id, reason)
-    if (s.video.versions.length) { s.video.stale = true; s.video.staleReason = reason }
+function markVideoOutdated(p: Project, ids: string[], text: string, key = 'shotEdit') {
+  const reason: OutdatedReason = { kind: 'video', key, text }
+  p.shots.filter(s => ids.includes(s.id)).forEach(s => {
+    // A first video in flight must also receive edits made after its input snapshot.
+    if (s.video.state === 'generating') queueReason(p.id, videoKey(s.id), reason)
+    if (s.video.versions.length) markOutdated(p, [s.id], reason)
   })
 }
 function assetLabel(a: Asset) { return `${a.kind === 'char' ? '角色' : '场景'}「${a.name}」` }
@@ -242,7 +253,7 @@ export const useStore = create<State>((set, get) => {
   /* ---------- 生成过程的「后半段」，供 generate* 与 start* 复用 ---------- */
   const snapshot = (id: string | null) => JSON.parse(JSON.stringify(get().projects.find(p => p.id === id))) as Project
   const message = (error: unknown) => error instanceof Error ? error.message : '生成失败'
-  const finishSegments = async (projectId: string | null) => {
+  const finishSegments = async (projectId: string | null, previousConfig?: Project['config']) => {
     const input = snapshot(projectId)
     try {
       if (!__REAL_TEXT__) await delay(1600)
@@ -256,7 +267,7 @@ export const useStore = create<State>((set, get) => {
       }, projectId)
       get().showToast(`已生成 ${segments.length} 个剧本段落`)
     } catch (error) {
-      patchProject(p => { p.segStatus = p.segments.length ? 'done' : 'none' }, projectId)
+      patchProject(p => { p.segStatus = p.segments.length ? 'done' : 'none'; if (previousConfig) p.config = previousConfig }, projectId)
       if (get().currentId === projectId) set({ step: input.segments.length ? 2 : 1 })
       get().showToast(`拆解失败：${message(error)}，本次未扣费`)
     }
@@ -302,13 +313,26 @@ export const useStore = create<State>((set, get) => {
               const seg = p.segments.find(s => s.id === next.segId)
               if (!seg) continue
               const old = p.shots.find(s => s.segId === next.segId)
+              // Results use the generation snapshot's names. Apply any renames
+              // made in flight without marking an @-only rename as outdated.
+              const names = input.assets.map(a => a.name)
+              SHOT_FIELDS.forEach(({ key }) => {
+                const text = mentionParts(String(next[key] ?? ''), names).map(part => {
+                  if (!part.name) return part.text
+                  const original = input.assets.find(a => a.name === part.name)!
+                  const current = p.assets.find(a => a.id === original.id)
+                  return current ? '@' + current.name : part.text
+                }).join('')
+                Object.assign(next, { [key]: text })
+              })
               next.dur = seg.dur ?? next.dur
               next.video = old?.video ?? next.video
               next.assetIds = next.assetIds?.filter(id => p.assets.some(a => a.id === id))
-              next.outdated = pendingShotReasons.get(p.id)?.get(seg.id) ?? []
+              next.outdated = next.video.versions.length ? [{ kind: 'video', key: 'shotEdit', text: '镜头已重新生成' }] : []
+              for (const reason of pendingReasons.get(p.id)?.get(shotKey(seg.id)) ?? []) next.outdated = mergeReason(next.outdated, reason)
               if (old) p.shots[p.shots.indexOf(old)] = next
               else p.shots.push(next)
-              markVideoStale(p, [next.id], '镜头已重新生成')
+              if (next.video.state === 'generating') queueReason(p.id, videoKey(next.id), { kind: 'video', key: 'shotEdit', text: '镜头已重新生成' })
               p.balance -= COST.shotGenEach
               succeeded++
             }
@@ -319,7 +343,7 @@ export const useStore = create<State>((set, get) => {
           for (const seg of batch) {
             generatingSegIds.get(projectId)?.delete(seg.id)
             generatingAssetIds.get(projectId)?.delete(seg.id)
-            pendingShotReasons.get(projectId)?.delete(seg.id)
+            clearPending(projectId, shotKey(seg.id))
           }
         } catch (error) {
           failed += batch.length; failure = message(error)
@@ -331,7 +355,7 @@ export const useStore = create<State>((set, get) => {
       patchProject(p => { p.shotStatus = p.shots.length ? 'done' : 'none' }, projectId)
       generatingAssetIds.delete(projectId)
       generatingSegIds.delete(projectId)
-      pendingShotReasons.delete(projectId)
+      segIds.forEach(id => clearPending(projectId, shotKey(id)))
     }
     get().showToast(failed ? `${succeeded ? `已生成 ${succeeded} 个镜头；` : ''}${failed} 个段落生成失败：${failure}，失败段落本次未扣费` : `已生成 ${succeeded} 个镜头`)
   }
@@ -350,9 +374,7 @@ export const useStore = create<State>((set, get) => {
           const s = p.shots.find((x) => x.id === id)
           if (s) {
             s.video.state = 'done'
-            const reason = pendingVideoStale.get(p.id)?.get(id)
-            s.video.staleReason = reason
-            s.video.stale = !!reason
+            s.outdated = pendingReasons.get(p.id)?.get(videoKey(id)) ?? []
             // 每次生成都追加一个新版本：已生成的视频是用户付费得来的资产，绝不覆盖
             const n = s.video.versions.length
             s.video.versions.forEach((v) => (v.preferred = false))
@@ -366,9 +388,8 @@ export const useStore = create<State>((set, get) => {
             p.balance -= videoCost(inputs.get(id)!.dur)
           }
         }, projectId)
-        if (projectId) pendingVideoStale.get(projectId)?.delete(id)
+        if (projectId) clearPending(projectId, videoKey(id))
       }
-      if (projectId && !pendingVideoStale.get(projectId)?.size) pendingVideoStale.delete(projectId)
       get().showToast('视频已全部生成')
     } catch (error) {
       get().showToast(`视频生成失败：${message(error)}，失败视频本次未扣费`)
@@ -377,8 +398,7 @@ export const useStore = create<State>((set, get) => {
         if (shotIds.includes(shot.id) && shot.video.state === 'generating') shot.video.state = shot.video.versions.length ? 'done' : 'none'
       }), projectId)
       if (projectId) {
-        shotIds.forEach(id => pendingVideoStale.get(projectId)?.delete(id))
-        if (!pendingVideoStale.get(projectId)?.size) pendingVideoStale.delete(projectId)
+        shotIds.forEach(id => clearPending(projectId, videoKey(id)))
       }
     }
   }
@@ -472,7 +492,7 @@ export const useStore = create<State>((set, get) => {
         seg.dur = dur
         if (durChanged && shot) {
           shot.dur = dur!
-          syncDurationVideoStale(shot, p.id)
+          markDurationOutdated(shot, p)
         }
         if (textChanged) message = !options?.silent && shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
       })
@@ -482,34 +502,37 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const shot = p.shots.find((s) => s.id === id)
         if (!shot) return
-        retainShotDescription(shot)
+        retainShot(shot)
+        clearPending(p.id, shotKey(shot.segId)); clearPending(p.id, videoKey(shot.id))
       })
-      get().showToast('已保留当前描述')
+      get().showToast('已保留')
     },
     dismissAllOutdated: () => {
       let count = 0
       patchProject((p) => {
-        p.shots.filter((s) => s.outdated?.length).forEach((s) => { retainShotDescription(s); count++ })
+        p.shots.filter((s) => s.outdated?.length).forEach((s) => { retainShot(s); clearPending(p.id, shotKey(s.segId)); clearPending(p.id, videoKey(s.id)); count++ })
       })
-      get().showToast(`已保留 ${count} 个镜头的当前描述`)
+      get().showToast(`已保留 ${count} 个镜头`)
     },
     renameAsset: (id, name, sync) => {
       patchProject((p) => {
         const a = p.assets.find((a) => a.id === id)
         const next = name.trim()
-        if (!a || !next || p.assets.some((x) => x.id !== id && x.kind === a.kind && x.name === next)) return
+        if (!a || !next || p.assets.some((x) => x.id !== id && x.name === next)) return
         const old = a.name
+        if (old === next) return
+        const names = p.assets.map(a => a.name)
         a.name = next
-        if (sync && old !== next) {
-          const replace = (s: string) => s.split(old).join(next)
-          p.segments.forEach((seg) => { seg.text = replace(seg.text) })
-          const changedIds: string[] = []
-          p.shots.forEach((shot) => {
-            if (SHOT_FIELDS.some(({ key }) => String(shot[key] ?? '').includes(old))) changedIds.push(shot.id)
-            SHOT_FIELDS.forEach(({ key }) => { Object.assign(shot, { [key]: replace(String(shot[key] ?? '')) }) })
+        p.segments.forEach(seg => { seg.text = renameText(seg.text, names, old, next, sync).value })
+        const changedIds: string[] = []
+        p.shots.forEach(shot => {
+          SHOT_FIELDS.forEach(({ key }) => {
+            const result = renameText(String(shot[key] ?? ''), names, old, next, sync)
+            if (result.plainChanged) changedIds.push(shot.id)
+            Object.assign(shot, { [key]: result.value })
           })
-          markVideoStale(p, changedIds, '镜头描述已修改')
-        }
+        })
+        markVideoOutdated(p, changedIds, '镜头描述已修改')
       })
     },
 
@@ -534,10 +557,9 @@ export const useStore = create<State>((set, get) => {
       let message = ''
       patchProject((p) => {
         const name = fields.name.trim()
-        if (!name || p.assets.some((a) => a.kind === kind && a.name === name)) return
-        const a: Asset = { id: uid('asset'), kind, name, desc: fields.desc.trim(), prompt: fields.prompt.trim(), importance: 'minor', imgState: 'none' }
+        if (!name || !fields.prompt.trim() || p.assets.some((a) => a.name === name)) return
+        const a: Asset = { id: uid('asset'), kind, name, prompt: fields.prompt.trim(), importance: 'minor', imgState: 'none' }
         a.belongSegs = p.segments.filter((seg) => seg.text.includes(name)).map((seg) => seg.no)
-        a.prompt ||= `${kind === 'char' ? '角色' : '场景'}「${name}」${a.desc ? `：${a.desc}` : '，清晰呈现外观与画面氛围'}`
         p.assets.push(a)
         const reason: OutdatedReason = { kind: 'asset', key: a.id, text: `${assetLabel(a)}已新增` }
         const segIds = p.segments.filter((seg) => seg.text.includes(name)).map((seg) => seg.id)
@@ -562,7 +584,7 @@ export const useStore = create<State>((set, get) => {
           const id = ids[i]
           patchProject((p) => {
             const a = p.assets.find((x) => x.id === id)
-            if (a) { console.info('[参考图提示词]', buildAssetImagePrompt(a, p)); a.imgState = 'done'; a.imageUrl = mockImage(buildAssetImagePrompt(a, p), a.id + i); p.balance -= COST.assetImgEach; markVideoStale(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`) }
+            if (a) { console.info('[参考图提示词]', buildAssetImagePrompt(a, p)); a.imgState = 'done'; a.imageUrl = mockImage(buildAssetImagePrompt(a, p), a.id + i); p.balance -= COST.assetImgEach; markVideoOutdated(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`, a.id) }
           }, projectId)
         }
         get().showToast(ids.length > 1 ? '参考图已全部生成' : '参考图已生成')
@@ -578,33 +600,28 @@ export const useStore = create<State>((set, get) => {
     clearAssetImage: (id) => {
       patchProject((p) => {
         const a = p.assets.find((x) => x.id === id)
-        if (a) { a.imgState = 'none'; a.imageUrl = undefined; markVideoStale(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`) }
+        if (a) { a.imgState = 'none'; a.imageUrl = undefined; markVideoOutdated(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`, a.id) }
       })
       get().showToast('已清除参考图')
     },
 
-    updateAsset: (id, patch, options) => {
-      let count = 0
-      patchProject((p) => {
-        const a = p.assets.find((a) => a.id === id)
+    updateAsset: (id, patch) => {
+      if (patch.name !== undefined) get().renameAsset(id, patch.name, false)
+      patchProject(p => {
+        const a = p.assets.find(a => a.id === id)
         if (!a) return
-        const refs = shotsReferencingAsset(p, a).map((s) => s.id)
-        const changed = patch.desc !== undefined && patch.desc !== a.desc
-        const imageChanged = patch.imageUrl !== undefined && patch.imageUrl !== a.imageUrl
-        Object.assign(a, patch)
-        if (changed && !options?.silent) {
-          count = markAssetOutdated(p, a, { kind: 'asset', key: id, text: `${assetLabel(a)}设定已修改` })
-        }
-        if (imageChanged) markVideoStale(p, refs, `${assetLabel(a)}参考图已更新`)
+        const imageChanged = ('imageUrl' in patch && patch.imageUrl !== a.imageUrl) || ('imgState' in patch && patch.imgState === 'none' && a.imgState !== 'none')
+        const { name: _name, ...fields } = patch
+        Object.assign(a, fields)
+        if (imageChanged) markVideoOutdated(p, shotsReferencingAsset(p, a).map(s => s.id), `${assetLabel(a)}参考图已更新`, id)
       })
-      get().showToast(count ? `设定已保存，${count} 个镜头需要更新` : '设定已保存')
+      get().showToast('设定已保存')
     },
     deleteAsset: (id) => {
       patchProject((p) => {
         const a = p.assets.find((a) => a.id === id)
         if (!a) return
         markAssetOutdated(p, a, { kind: 'asset', key: id, text: `${assetLabel(a)}已删除` })
-        markVideoStale(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}已删除`)
         p.shots.forEach((shot) => { shot.assetIds = shot.assetIds?.filter((assetId) => assetId !== id) ?? [] })
         p.assets = p.assets.filter((x) => x.id !== id)
       })
@@ -625,14 +642,15 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const s = p.shots.find((x) => x.id === id)
         if (!s) return
-        // 只在值真的变化时写入，避免 blur 空提交把视频误标为需重新生成
+        if (patch.timeline !== undefined) patch = { ...patch, timeline: formatTimeline(timelineLines(patch.timeline)) }
+        // 只在值真的变化时写入，避免 blur 空提交误标待更新
         const changed = Object.entries(patch).some(
           ([k, v]) => String(s[k as keyof Shot] ?? '') !== String(v ?? ''),
         )
         if (!changed) return
         Object.assign(s, patch)
         // 镜头内容变了，已有视频失效
-        if (SHOT_FIELDS.some(({ key }) => key in patch)) markVideoStale(p, [id], '镜头描述已修改')
+        if (SHOT_FIELDS.some(({ key }) => key in patch)) markVideoOutdated(p, [id], '镜头描述已修改')
       })
     },
 
@@ -659,29 +677,22 @@ export const useStore = create<State>((set, get) => {
       shotIds = shotIds.filter((id) => project.shots.some((s) => s.id === id && s.video.state !== 'generating'))
       if (!shotIds.length) return
       patchProject((p) => {
-        p.shots.forEach((s) => { if (shotIds.includes(s.id)) { pendingVideoStale.get(p.id)?.delete(s.id); s.video.state = 'generating' } })
+        p.shots.forEach((s) => { if (shotIds.includes(s.id)) { clearPending(p.id, videoKey(s.id)); s.video.state = 'generating' } })
       })
       get().showToast('正在生成视频…')
       await finishVideos(shotIds, projectId)
     },
 
-    dismissVideoStale: (shotId) => {
-      patchProject((p) => {
-        const shot = p.shots.find((s) => s.id === shotId)
-        if (shot) { shot.video.stale = false; shot.video.staleReason = undefined }
-      })
-      get().showToast('已保留当前视频')
-    },
-
     restartSegments: async (durMode, targetDur, style) => {
       const p = get().projects.find((p) => p.id === get().currentId)
       if (!p || p.segStatus !== 'done' || p.assetStatus !== 'none') return
+      const previousConfig = structuredClone(p.config)
       patchProject((p) => {
         p.config = { ...p.config, shotStyle: style === undefined ? p.config.shotStyle : style.trim() || undefined, durMode, targetDur: durMode === 'manual' ? clampTargetDuration(targetDur ?? 60) : undefined }
         p.segStatus = 'generating'
       })
       set({ step: 2 })
-      await finishSegments(p.id)
+      await finishSegments(p.id, previousConfig)
     },
 
     /* ---------- 确认即推进：先置 generating，再切页，最后跑生成 ---------- */
@@ -727,7 +738,7 @@ export const useStore = create<State>((set, get) => {
       shotIds = shotIds.filter((id) => project.shots.some((s) => s.id === id && s.video.state !== 'generating'))
       if (!shotIds.length) return
       patchProject((p) => {
-        p.shots.forEach((s) => { if (shotIds.includes(s.id)) { pendingVideoStale.get(p.id)?.delete(s.id); s.video.state = 'generating' } })
+        p.shots.forEach((s) => { if (shotIds.includes(s.id)) { clearPending(p.id, videoKey(s.id)); s.video.state = 'generating' } })
       })
       set({ step: 5 })
       await finishVideos(shotIds, projectId)

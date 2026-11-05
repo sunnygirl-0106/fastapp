@@ -139,9 +139,9 @@ export default function Step3Assets({ project }: { project: Project }) {
       </ActionBar>
 
       {addKind && <EditableAssetSettingModal
-        a={{ id: 'new-asset', kind: addKind, name: '', desc: '', prompt: '', importance: 'minor', imgState: 'none' }}
+        a={{ id: 'new-asset', kind: addKind, name: '', prompt: '', importance: 'minor', imgState: 'none' }}
         project={project} isNew onClose={() => setAddKind(null)}
-        onSave={(patch) => addAsset(addKind, { name: patch.name ?? '', desc: patch.desc ?? '', prompt: patch.prompt ?? '' })}
+        onSave={(patch) => addAsset(addKind, { name: patch.name ?? '', prompt: patch.prompt ?? '' })}
       />}
 
       {/* 批量生成参考图 */}
@@ -183,7 +183,7 @@ export default function Step3Assets({ project }: { project: Project }) {
               a={a}
               project={project}
               onClose={() => setEditFor(null)}
-              onSave={(patch, options) => updateAsset(a.id, patch, options)}
+              onSave={(patch) => updateAsset(a.id, patch)}
             />
           )
         })()}
@@ -191,7 +191,7 @@ export default function Step3Assets({ project }: { project: Project }) {
       {deleteFor && <Modal title={`删除${deleteFor.kind === 'char' ? '角色' : '场景'}`} width={480} onClose={() => setDeleteFor(null)} footer={<><Button onClick={() => setDeleteFor(null)}>取消</Button><Button variant="danger-solid" onClick={() => { deleteAsset(deleteFor.id); setDeleteFor(null) }}>删除{deleteFor.kind === 'char' ? '角色' : '场景'}</Button></>}>
         <p className="text-sm leading-relaxed text-white/80">{(() => {
           const n = shotsReferencingAsset(project, deleteFor).length
-          return n ? `「${deleteFor.name}」被 ${n} 个镜头引用。删除后，这些镜头会标记为待更新，已生成的视频会标记为需重新生成。` : `确定删除「${deleteFor.name}」吗？`
+          return n ? `「${deleteFor.name}」被 ${n} 个镜头引用。删除后，这些镜头会标记为待更新。` : `确定删除「${deleteFor.name}」吗？`
         })()}</p>
       </Modal>}
 
@@ -405,11 +405,13 @@ function GenAssetImageModal({
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
+          <div className="text-sm text-white/60">生图提示词</div>
           <textarea
             rows={6}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={`描述「${a.name}」的外观、气质与画面风格，用于生成${kindCn}参考图`}
+            aria-label="生图提示词"
+            placeholder={`描述「${a.name}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
             className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
           />
 
@@ -468,7 +470,7 @@ function BatchModal({
   const cost = sel.length * COST.assetImgEach
 
   const confirm = () => {
-    if (!sel.length) return
+    if (!sel.length || sel.some(id => !prompts[id]?.trim())) return
     const edits: Record<string, string> = {}
     sel.forEach((id) => {
       const a = assets.find((x) => x.id === id)
@@ -505,7 +507,8 @@ function BatchModal({
                   rows={4}
                   value={prompts[a.id] ?? ''}
                   onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
-                  placeholder={`描述「${a.name}」的外观与画面风格`}
+                  aria-label={`生图提示词 · ${a.name}`}
+                  placeholder={`描述「${a.name}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
                   className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
                 />
               </div>
@@ -564,7 +567,7 @@ function BatchModal({
             <Diamond />
             合计预计消耗<span className="text-brand">{fmt(cost)}星钻</span>（{sel.length}张）
           </div>
-          <PillCTA disabled={!sel.length} onClick={confirm}>
+          <PillCTA disabled={!sel.length || sel.some(id => !prompts[id]?.trim())} onClick={confirm}>
             确认生成（{sel.length}）
           </PillCTA>
         </div>
@@ -584,23 +587,20 @@ function EditableAssetSettingModal({
   a: Asset
   project: Project
   onClose: () => void
-  onSave: (patch: Partial<Asset>, options?: { silent?: boolean }) => void
+  onSave: (patch: Partial<Asset>) => void
 }) {
   const isChar = a.kind === 'char'
   const kindCn = isChar ? '角色' : '场景'
   const [name, setName] = useState(a.name)
   const [nameTouched, setNameTouched] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
-  const duplicate = project.assets.some((x) => x.id !== a.id && x.kind === a.kind && x.name === name.trim())
+  const duplicate = project.assets.some((x) => x.id !== a.id && x.name === name.trim())
   const occurrences = renameOccurrences(project, a.name)
   const save = (sync: boolean) => {
-    onSave(isNew ? { name, desc, prompt } : { desc, prompt }, { silent })
+    onSave(isNew ? { name, prompt } : { prompt })
     if (!isNew && name.trim() !== a.name) useStore.getState().renameAsset(a.id, name, sync)
     onClose()
   }
-  const [silent, setSilent] = useState(false)
-  const affectedCount = shotsReferencingAsset(project, a).length
-  const [desc, setDesc] = useState(a.desc)
   const [prompt, setPrompt] = useState(a.prompt)
 
   const boxCls =
@@ -619,49 +619,37 @@ function EditableAssetSettingModal({
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
-          {/* 名称与同类型重名校验 */}
+          {/* 名称与跨类型重名校验 */}
           <div className="flex flex-col gap-2">
             <div className="text-[14px] text-white/60">{kindCn}名称</div>
             <input aria-label={`${kindCn}名称`} className={boxCls} value={name} onChange={(e) => { setName(e.target.value); setNameTouched(true) }} />
-            {duplicate && <p className="text-xs text-red-400">已存在同名{kindCn}</p>}
+            {duplicate && <p className="text-xs text-red-400">名称已被其他角色或场景使用</p>}
             {nameTouched && !name.trim() && <p className="text-xs text-red-400">名称不能为空</p>}
           </div>
 
-          {/* 描述 */}
+          {/* 生图提示词 */}
           <div className="flex flex-col gap-3">
-            <div className="text-[14px] text-white/60">{kindCn}描述</div>
-            <textarea
-              rows={5}
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder={`描述${name.trim() ? `「${name.trim()}」` : kindCn}的设定`}
-              className={boxCls}
-            />
-          </div>
-
-          {/* 参考图描述 */}
-          <div className="flex flex-col gap-3">
-            <div className="text-[14px] text-white/60">参考图描述</div>
+            <div className="text-[14px] text-white/60">生图提示词</div>
             <textarea
               rows={6}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={`描述${name.trim() ? `「${name.trim()}」` : kindCn}的外观与画面风格`}
+              aria-label="生图提示词"
+              placeholder={`描述「${name.trim() || kindCn}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
               className={boxCls}
             />
-            <div className="text-[14px] text-white/40">用于生成{kindCn}参考图</div>
+            <div className="text-[14px] text-white/40">用于生成参考图和镜头设计</div>
           </div>
-          {affectedCount > 0 && !isNew && desc !== a.desc && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />这次修改不影响已生成的 {affectedCount} 个镜头</label>}
         </div>
 
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-2 px-5 pb-5">
           <PillOutline onClick={onClose}>取消</PillOutline>
           <PillCTA
-            disabled={!name.trim() || duplicate}
+            disabled={!name.trim() || duplicate || !prompt.trim()}
             onClick={() => {
               setNameTouched(true)
-              if (!name.trim() || duplicate) return
+              if (!name.trim() || duplicate || !prompt.trim()) return
               if (!isNew && name.trim() !== a.name && occurrences.length) setSyncOpen(true)
               else save(false)
             }}

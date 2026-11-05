@@ -1,5 +1,5 @@
 // Explicit opt-in only. Each real round changes STOP_AT_USD to current spend + $0.50.
-// Local browser storage is isolated; results are saved under ignored .usage/acceptance/.
+// Local browser storage is isolated; results are saved under ignored .usage/acceptance-v9/.
 import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { createServer } from 'vite'
@@ -8,15 +8,15 @@ const phase=process.argv[2]
 if(!['--no-key','--zero','--round1','--round2','--inspect'].includes(phase)) throw Error('Specify --no-key, --zero, --round1, --round2 or --inspect')
 const originalEnv=await readFile('.env.local','utf8')
 const originalFetch=globalThis.fetch, originalTimeout=globalThis.setTimeout, originalError=console.error
-const dom=new JSDOM('',{url:'http://localhost:5188'})
+const dom=new JSDOM('',{url:'http://localhost:5199'})
 Object.assign(globalThis,{window:dom.window,localStorage:dom.window.localStorage,Event:dom.window.Event})
 globalThis.setTimeout=(fn,ms,...args)=>originalTimeout(fn,[900,1200,1600].includes(ms)?0:ms,...args)
 let server,outputs=[],errors=[],report={phase,startedAt:new Date().toISOString()}
-await mkdir('.usage/acceptance',{recursive:true})
-const filename='.usage/acceptance/'+phase.slice(2)+'.json'
+await mkdir('.usage/acceptance-v9',{recursive:true})
+const filename='.usage/acceptance-v9/'+phase.slice(2)+'.json'
 const stopEnv=value=>originalEnv.replace(/^STOP_AT_USD=.*$/m,'STOP_AT_USD='+value)
-const start=async()=>{server=await createServer({server:{port:5188,strictPort:true,host:'127.0.0.1'}});await server.listen()}
-const totals=async()=>{const response=await originalFetch('http://localhost:5188/api/usage');assert.equal(response.status,200);return response.json()}
+const start=async()=>{server=await createServer({server:{port:5199,strictPort:true,host:'127.0.0.1'}});await server.listen()}
+const totals=async()=>{const response=await originalFetch('http://localhost:5199/api/usage');assert.equal(response.status,200);return response.json()}
 console.error=(...args)=>{if(args[0]==='[文本校验失败]'){errors.push(args[1]);console.log('VALIDATION FAILURE',JSON.stringify(args[1].errors))}else originalError(...args)}
 try {
   if(phase==='--no-key') await unlink('.env.local')
@@ -29,7 +29,7 @@ try {
       assert.notEqual(before.remote,null,'Actual spend unavailable; no real testing permitted')
       let first
       if(phase==='--round2') {
-        first=JSON.parse(await readFile('.usage/acceptance/round1.json','utf8'))
+        first=JSON.parse(await readFile('.usage/acceptance-v9/round1.json','utf8'))
         assert.ok(!first.blocked,'Round 1 was blocked; do not continue')
         assert.ok(before.spent-first.before.spent<0.5,'Combined test budget too small for another full round')
       }
@@ -39,7 +39,7 @@ try {
       await server.close();await writeFile('.env.local',stopEnv(report.stopAt),{mode:0o600});await start()
     }
     globalThis.fetch=async(url,options)=>{
-      const target=String(url).startsWith('/')?'http://localhost:5188'+url:url
+      const target=String(url).startsWith('/')?'http://localhost:5199'+url:url
       const response=await originalFetch(target,options)
       if(String(url)==='/api/openrouter/chat/completions') {
         const data=await response.clone().json()
@@ -50,9 +50,10 @@ try {
       return response
     }
     const {useStore}=await server.ssrLoadModule('/src/store/workflowStore.ts')
+    const {cleanScript}=await server.ssrLoadModule('/src/services/validation.ts')
     const state=()=>useStore.getState(),p=()=>state().projects.find(p=>p.id===state().currentId)
     const round2=phase==='--round2'
-    state().createProject('v8 验收 '+phase)
+    state().createProject('v9 验收 '+phase)
     const script=phase==='--no-key'?(await server.ssrLoadModule('/src/data/mock.ts')).SAMPLE_SCRIPT:await readFile('../测试提示词效果/examples/'+(round2?'老师测试剧本1-1.txt':'示例剧本.txt'),'utf8')
     state().setScript(script)
     const initialBalance=p().balance
@@ -60,7 +61,7 @@ try {
     if(phase==='--zero') {
       assert.equal(p().segStatus,'none');assert.equal(state().step,1);assert.equal(p().balance,initialBalance);assert.match(state().toast,/预算已用到.*已停止调用.*本次未扣费/)
       assert.equal(outputs.length,1);assert.equal(outputs[0].status,402)
-      const html=await (await originalFetch('http://localhost:5188/usage')).text();assert.match(html,/累计已花/)
+      const html=await (await originalFetch('http://localhost:5199/usage')).text();assert.match(html,/累计已花/)
       report.toast=state().toast;report.complete=true;console.log('ZERO BUDGET PASS',state().toast)
     } else {
       const requireDone=(status,label)=>{if(status!=='done')throw Error(label+'：'+state().toast)}
@@ -70,10 +71,18 @@ try {
       if(round2){assert.match(p().scriptPreface,/人物小传/);assert.ok(!p().segments.some(s=>s.text.includes('人物小传')))}
       console.log('SEGMENTS',JSON.stringify({count:p().segments.length,durations:p().segments.map(s=>s.dur),prefaceChars:p().scriptPreface?.length??0}))
       await state().startAssets();requireDone(p().assetStatus,'assets')
+      assert.ok(p().assets.every(a=>!('desc' in a)&&a.prompt.trim()))
       console.log('ASSETS',JSON.stringify(p().assets.map(a=>({kind:a.kind,name:a.name}))))
       await state().generateAssetImages(p().assets.map(a=>a.id))
       await state().startShots(p().segments.map(s=>s.no));requireDone(p().shotStatus,'shots')
       if(p().shots.length!==p().segments.length || /失败/.test(state().toast))throw Error(state().toast)
+      report.contentReview={
+        durations:p().segments.map(s=>s.dur),
+        quoteRestored:p().segments.every(s=>cleanScript(script).includes(s.text.trim())),
+        assetPromptWarnings:p().assets.filter(a=>/排版|三视图|拼贴|纯色背景|白色背景/.test(a.prompt)).map(a=>({name:a.name,prompt:a.prompt})),
+        shotWordingWarnings:p().shots.flatMap(s=>['shot','timeline','action','anchor','motion','blocking','subject','continuity','forbid','background'].filter(k=>/意识到|心想|仿佛|宛如|内心/.test(s[k])).map(k=>({shot:s.no,field:k,text:s[k]}))),
+      }
+      report.contentReview.passed=report.contentReview.quoteRestored&&!report.contentReview.assetPromptWarnings.length&&!report.contentReview.shotWordingWarnings.length
       await state().startVideos(p().shots.map(s=>s.id))
       assert.ok(p().shots.every(s=>s.video.versions.length===1&&s.video.versions[0].videoPrompt.includes('时间轴：0–')&&s.video.versions[0].videoPrompt.includes('@图片1')))
       const first=structuredClone(p().shots[0]),oldVersion=structuredClone(first.video.versions[0])
@@ -95,7 +104,7 @@ try {
   if(server){try{report.after=await totals()}catch{}await server.close()}
   report.outputs=outputs;report.errors=errors
   await writeFile(filename,JSON.stringify(report,null,2))
-  await writeFile('.env.local',originalEnv.replace(/^STOP_AT_USD=.*$/m,'STOP_AT_USD=4.5'),{mode:0o600})
+  await writeFile('.env.local',originalEnv,{mode:0o600})
   globalThis.fetch=originalFetch;globalThis.setTimeout=originalTimeout;console.error=originalError
   dom.window.close()
   console.log('REPORT',filename,JSON.stringify({complete:report.complete,spent:report.after?.spent,roundCost:report.before&&report.after?report.after.spent-report.before.spent:undefined}))

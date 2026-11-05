@@ -3,8 +3,9 @@ import { uid } from './generation'
 import { parseJsonl, validateSegments, validateAssets, validateShots, ValidationError } from './validation'
 export { ValidationError } from './validation'
 export const jsonl = (rows: object[]) => rows.map(row => JSON.stringify(row)).join('\n')
-export const timelineLines = (timeline: string): string[] => timeline.split('\n').map(line => line.replace(/^\s*[①-⑩]\s*/, '').trim()).filter(Boolean)
-export const formatTimeline = (lines: string[]) => lines.map((line, i) => `${String.fromCodePoint(0x2460 + i)} ${line}`).join('\n')
+export const BEAT_NUMBER = /^\s*(?:[①-⑳]|\d+\s*[.．、)）]|[（(]\d+[)）])\s*/
+export const timelineLines = (timeline: string): string[] => timeline.split('\n').map(line => line.replace(BEAT_NUMBER, '').trim()).filter(Boolean)
+export const formatTimeline = (lines: string[]) => lines.map((line, i) => `${i < 20 ? String.fromCodePoint(0x2460 + i) : `${i + 1}.`} ${line.replace(BEAT_NUMBER, '').trim()}`).join('\n')
 function validated<T>(raw: string, parse: () => T): T {
   try { return parse() } catch (error) { if (error instanceof ValidationError) error.raw = raw; throw error }
 }
@@ -19,13 +20,13 @@ export function parseSegments(text: string, mode: 'auto' | 'manual', target?: nu
   })
 }
 export function encodeAssets(assets: Asset[]) {
-  return jsonl(assets.map(a => ({ type: 'asset', client_key: a.id, kind: a.kind === 'char' ? 'character' : 'scene', name: a.name, alias: a.alias ?? '', importance: a.importance, description: a.desc, prompt: a.prompt, segment_ordinals: a.belongSegs ?? [] })))
+  return jsonl(assets.map(a => ({ type: 'asset', client_key: a.id, kind: a.kind === 'char' ? 'character' : 'scene', name: a.name, alias: a.alias ?? '', importance: a.importance, prompt: a.prompt, segment_ordinals: a.belongSegs ?? [] })))
 }
 export function parseAssets(text: string, segments?: Segment[]): Asset[] {
   return validated(text, () => {
     const rows = parseJsonl(text)
     validateAssets(rows, segments?.map(s => s.no) ?? [...new Set<number>(rows.flatMap(r => Array.isArray(r.segment_ordinals) ? r.segment_ordinals : []))])
-    return rows.map(r => ({ id: uid(r.kind === 'character' ? 'char' : 'scene'), kind: r.kind === 'character' ? 'char' : 'scene', name: r.name, alias: r.alias, importance: r.importance, desc: r.description, prompt: r.prompt, belongSegs: r.segment_ordinals, imgState: 'none' }))
+    return rows.map(r => ({ id: uid(r.kind === 'character' ? 'char' : 'scene'), kind: r.kind === 'character' ? 'char' : 'scene', name: r.name, alias: r.alias, importance: r.importance, prompt: r.prompt, belongSegs: r.segment_ordinals, imgState: 'none' }))
   })
 }
 export function encodeShot(s: Shot, ordinal: number) {

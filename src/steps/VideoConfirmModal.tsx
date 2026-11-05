@@ -1,7 +1,6 @@
 import type { Shot } from '@/types'
 import { VIDEO_DUR_SPEC, supportsDuration } from '@/data/duration'
 import { no2 } from '@/utils/project'
-import NoticeBar from '@/components/NoticeBar'
 import { useEffect, useState } from 'react'
 import { MODELS, MODEL_OPTIONS, videoCost } from '@/services/generation'
 import { FakeSelect, GenerateConfirmModal, Label, ModelSelect } from '@/components/ui'
@@ -20,7 +19,6 @@ export default function VideoConfirmModal({
   const [model, setModel] = useState<string>(MODELS.video)
 
   const count = shots.length
-  const outdated = shots.filter((s) => s.outdated?.length)
   const disabledOptions: Record<string, string> = {}
   MODEL_OPTIONS.video.forEach((option) => {
     const unsupported = shots.filter((s) => !supportsDuration(option, s.dur))
@@ -32,7 +30,6 @@ export default function VideoConfirmModal({
   })
   const selectedModel = disabledOptions[model] ? MODELS.video : model
   useEffect(() => { if (disabledOptions[model]) setModel(MODELS.video) }, [model, shots])
-  const shotList = outdated.slice(0, 3).map((s) => `镜头 ${no2(s.no)}`).join('、') + (outdated.length > 3 ? ` 等 ${outdated.length} 个` : '')
   return (
     <GenerateConfirmModal
       title="确认生成视频"
@@ -50,7 +47,6 @@ export default function VideoConfirmModal({
       onConfirm={onConfirm}
       extra={
         <>
-        {outdated.length > 0 && <NoticeBar>其中 {outdated.length} 个镜头描述待更新（{shotList}），仍会按旧描述生成。</NoticeBar>}
         <div className="grid grid-cols-3 gap-4 text-[13px]">
           <div>
             <Label>分辨率</Label>

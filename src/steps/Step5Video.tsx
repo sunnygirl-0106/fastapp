@@ -1,4 +1,6 @@
-import VideoStaleChip from '@/components/VideoStaleChip'
+import OutdatedChip from '@/components/OutdatedChip'
+import MentionText from '@/components/MentionText'
+import { timelineLines, formatTimeline } from '@/services/parse'
 import { useState } from 'react'
 import { Download, Monitor, MoreVertical, Play, X } from 'lucide-react'
 import type { Project, Shot } from '@/types'
@@ -139,7 +141,7 @@ export default function Step5Video({ project }: { project: Project }) {
                 <div className="flex items-center justify-between text-[12px]">
                   <span className={`font-medium ${done ? 'text-[#00d8dc]' : 'text-[#dcb400]'}`}>
                     {done ? '已完成' : '生成中'}
-                    {s.video.stale && done && <VideoStaleChip shot={s} fromVideoPage onRegenerate={() => goStep(4)} />}
+                    {!!s.outdated?.length && <OutdatedChip shot={s} project={project} onRegenerateVideo={() => goStep(4)} />}
                   </span>
                   <span className="text-white/40">{preferredVersion(s.video)?.dur ?? s.dur} 秒</span>
                 </div>
@@ -195,7 +197,7 @@ export default function Step5Video({ project }: { project: Project }) {
               </div>
               <section className="space-y-3">
                 <h3 className="text-base text-white/90">视频提示词</h3>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-white/80">{selectedVersion?.videoPrompt ?? '此历史版本未保存视频提示词'}</div>
+                <div className="whitespace-pre-wrap text-sm leading-6 text-white/80"><MentionText text={selectedVersion?.videoPrompt ?? '此历史版本未保存视频提示词'} assets={project.assets} references={selectedVersion?.referenceImages} /></div>
               </section>
               <section className="space-y-3">
                 <h3 className="text-base text-white/90">生成时的参考图</h3>
@@ -213,7 +215,7 @@ export default function Step5Video({ project }: { project: Project }) {
                     <div key={k} className="flex flex-col gap-2">
                       <div className="text-[12px] leading-[18px] text-white/40">{labelOf(k)}</div>
                       <div className="whitespace-pre-line text-[14px] leading-5 text-white/80">
-                        {String(info[k] ?? '') || '—'}
+                        <MentionText text={(k === 'timeline' ? formatTimeline(timelineLines(info.timeline)) : String(info[k] ?? '')) || '—'} assets={project.assets} />
                       </div>
                     </div>
                   ))}

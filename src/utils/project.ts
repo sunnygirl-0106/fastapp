@@ -1,3 +1,4 @@
+import { mentionParts } from './mentions'
 import { clampDuration } from '@/data/duration'
 import { SHOT_FIELDS, type Asset, type Project, type Segment, type Shot, type ShotVideo, type VideoVersion } from '@/types'
 
@@ -186,9 +187,10 @@ export function renameOccurrences(p: Project, name: string) {
   return fields.flatMap((f) => {
     const hits: { source: string; before: string; after: string }[] = []
     if (!name) return hits
+    const plain = mentionParts(f.text, p.assets.map(a => a.name)).filter(part => !part.mention)
     let pos = f.text.indexOf(name)
     while (pos >= 0) {
-      hits.push({ source: f.source, before: f.text.slice(Math.max(0, pos - 30), pos), after: f.text.slice(pos + name.length, pos + name.length + 30) })
+      if (plain.some(part => pos >= part.start && pos + name.length <= part.start + part.text.length)) hits.push({ source: f.source, before: f.text.slice(Math.max(0, pos - 30), pos), after: f.text.slice(pos + name.length, pos + name.length + 30) })
       pos = f.text.indexOf(name, pos + name.length)
     }
     return hits

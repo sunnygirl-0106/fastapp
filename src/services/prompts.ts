@@ -1,6 +1,7 @@
 import doc from '../../../测试提示词效果/全自动工作流提示词.md?raw'
 import type { Project, Segment, Shot } from '@/types'
 import { encodeShot } from './parse'
+import { stripUnknownMentions } from '@/utils/mentions'
 import { cleanScript } from './validation'
 
 // Parse at use time: malformed editable documents must reach the workflow's error toast.
@@ -57,6 +58,8 @@ export function buildShotUserMessage(project: Project, ordinals: number[], exist
     const no = project.segments.find(seg => seg.id === s.segId)?.no
     return no !== undefined && !ordinals.includes(no) && ordinals.some(n => Math.abs(n - no) === 1)
   })
+  const names = project.assets.map(a => a.name)
+  const clean = (text: string) => stripUnknownMentions(text, names)
   let current: Shot[] = []
   return getPromptBook().users[3].split('\n').flatMap(line => {
     if (line.startsWith('相邻段落的已有镜头') || line.startsWith('已有镜头')) {
@@ -66,11 +69,14 @@ export function buildShotUserMessage(project: Project, ordinals: number[], exist
     if (line.includes('{各字段当前内容}')) return current.map(s => {
       const no = project.segments.find(seg => seg.id === s.segId)!.no
       const { type: _type, ...data } = encodeShot(s, no)
-      return line.replace(/^\[\d+\]/, `[${no}]`).replace('{各字段当前内容}', () => JSON.stringify(data))
+      const sanitized = Object.fromEntries(Object.entries(data).map(([key, value]) => [key,
+        typeof value === 'string' ? clean(value) : key === 'timeline' ? (value as string[]).map(clean) : value,
+      ]))
+      return line.replace(/^\[\d+\]/, `[${no}]`).replace('{各字段当前内容}', () => JSON.stringify(sanitized))
     })
     if (line.includes('{标题}')) return project.segments.map(s => line.replace('[1]', `[${s.no}]`).replace('{标题}', () => s.title).replace('{时长}', String(s.dur)).replace('{原文}', () => s.text))
     if (line.includes('{asset_id}')) return project.assets.map(a => {
-      const values: Record<string, string> = { asset_id: a.id, '角色 / 场景': a.kind === 'char' ? '角色' : '场景', name: a.name, alias: a.alias ?? '', description: a.desc }
+      const values: Record<string, string> = { asset_id: a.id, '角色 / 场景': a.kind === 'char' ? '角色' : '场景', name: a.name, alias: a.alias ?? '', prompt: a.prompt }
       return line.replace(/\{([^{}]+)\}/g, (_, k) => values[k])
     })
     if (line.trim() === '……') return []

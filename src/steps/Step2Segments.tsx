@@ -1,3 +1,4 @@
+import OutdatedChip from '@/components/OutdatedChip'
 import SegmentConfirmModal from './SegmentConfirmModal'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
@@ -115,6 +116,7 @@ export default function Step2Segments({ project }: { project: Project }) {
       <div className="space-y-3">
         {segs.map((s) => (
           <ParagraphCard
+            project={project}
             key={s.id}
             seg={s}
             shot={project.shots.find((shot) => shot.segId === s.id)}
@@ -235,6 +237,7 @@ function BottomBar({
 
 /* ---------- 段落卡片 ---------- */
 function ParagraphCard({
+  project,
   seg,
   shot,
   onUpdate,
@@ -243,6 +246,7 @@ function ParagraphCard({
   durationDisabled,
   onDurationPreview,
 }: {
+  project: Project
   durationDisabled: boolean
   onDurationPreview: (dur: number | undefined) => void
   seg: Segment
@@ -286,7 +290,7 @@ function ParagraphCard({
             {seg.title}
           </button>
         )}
-        {!!shot?.outdated?.length && <span className="text-xs text-amber-300">镜头待更新</span>}
+        {!!shot?.outdated?.length && <OutdatedChip shot={shot} project={project} />}
         <div className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <DurationStepper value={seg.dur!} variant="inline" size="sm" title={`段落 ${no2(seg.no)} 时长`}
             disabled={durationDisabled} disabledTooltip=""

@@ -30,10 +30,11 @@ try {
   handler=()=>response('not json')
   await s().startSegments()
   check('首次拆解校验失败只重试一次，原文保留、不扣费、回第 1 步',()=>{assert.equal(calls.length,2);assert.equal(p().script,'正文保留。');assert.equal(p().segStatus,'none');assert.equal(s().step,1);assert.equal(p().balance,balance);assert.match(s().toast,/本次未扣费/)})
-  reset();useStore.setState({projects:[{...structuredClone(seed),assetStatus:'none'}]});const original=structuredClone(p().segments)
+  reset();useStore.setState({projects:[{...structuredClone(seed),assetStatus:'none'}]});const original=structuredClone(p().segments),originalConfig=structuredClone(p().config)
   handler=()=>Response.json({error:{message:'预算已用到 $0 / $5，已停止调用'}},{status:402})
-  await s().restartSegments('auto')
+  await s().restartSegments('manual',45,'新风格')
   check('重新拆解预算拒绝不重试、保留旧段落、停在第 2 步',()=>{assert.equal(calls.length,1);assert.deepEqual(p().segments,original);assert.equal(p().segStatus,'done');assert.equal(s().step,2);assert.match(s().toast,/预算已用到.*本次未扣费/)})
+  check('v9 重新拆解失败回滚时长模式、目标和风格',()=>assert.deepEqual(p().config,originalConfig))
   calls=[];handler=()=>{throw new TypeError('offline')};await s().startAssets()
   check('提取网络失败不重试，状态恢复且原资产保留',()=>{assert.equal(calls.length,1);assert.equal(p().assetStatus,'none');assert.equal(s().step,2);assert.deepEqual(p().assets,seed.assets)})
   reset();s().createProject('剧本设定');s().setScript('# 人物小传\n**小雨**：二十岁。\n\n第一场\n小雨走进房间。')
@@ -63,7 +64,7 @@ try {
   reset();let release
   handler=()=>new Promise(resolve=>{release=()=>resolve(Response.json({error:{message:'offline'}},{status:503}))})
   const oldShot=structuredClone(p().shots[0]),oldBalance=p().balance
-  const work=s().generateShots([1]);await Promise.resolve();s().updateAsset('a2',{desc:'生成中改设定'});release();await work
+  const work=s().generateShots([1]);await Promise.resolve();s().updateSegment('s1',{text:p().segments[0].text+'生成中修改。'});release();await work
   check('失败镜头保留旧内容和生成中的联动改动、不扣费',()=>{assert.equal(p().shots[0].shot,oldShot.shot);assert.equal(p().balance,oldBalance);assert.ok(p().shots[0].outdated.length)})
   const retryInput=structuredClone(p());handler=()=>response(mock.mockShots(retryInput,[1]).text);await s().generateShots([1])
   check('失败后的临时状态已清理，下一次生成可正常清除待更新',()=>{assert.equal(p().shotStatus,'done');assert.deepEqual(p().shots[0].outdated,[])})

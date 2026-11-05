@@ -2,7 +2,7 @@ import type { Asset, Project, Shot, VideoReferenceImage } from '@/types'
 import { timelineLines } from './parse'
 import { getPromptBook } from './prompts'
 import { roundEven, SHOT_TEXT_FIELDS } from './validation'
-export const fmtSeconds = (value: number) => String(value)
+export const fmtSeconds = (value: number) => String(Number(value.toFixed(6)))
 export function timeAxis(beats: string[], dur: number): [number, number, string][] {
   if (!beats.length) return []
   const minimums = beats.map(beat => {
@@ -11,11 +11,14 @@ export function timeAxis(beats: string[], dur: number): [number, number, string]
   })
   const total = minimums.reduce((a, b) => a + b, 0)
   const lengths = minimums.map(m => total <= dur ? m + (dur - total) / beats.length : m * dur / total)
+  // Hand-edited timelines may exceed the model's 8-beat limit. When a
+  // half-second grid cannot fit every beat, use continuous weighted bounds.
+  const dense = dur < beats.length * 0.5
   const bounds = [0]
   let cumulative = 0
   lengths.slice(0, -1).forEach((length, i) => {
     cumulative += length
-    bounds.push(Math.min(Math.max(roundEven(cumulative * 2) / 2, bounds[bounds.length - 1] + 0.5), dur - 0.5 * (beats.length - i - 1)))
+    bounds.push(dense ? cumulative : Math.min(Math.max(roundEven(cumulative * 2) / 2, bounds[bounds.length - 1] + 0.5), dur - 0.5 * (beats.length - i - 1)))
   })
   bounds.push(dur)
   return beats.map((beat, i) => [bounds[i], bounds[i + 1], beat])
@@ -36,19 +39,20 @@ export function videoReferenceImages(shot: Shot, project: Project): VideoReferen
   }).map((ref, i) => ({ ...ref, label: `@图片${i + 1}` }))
 }
 export function buildReferenceImagePrompt(asset: Asset, project?: Project): string {
-  const desc = (asset.prompt.trim() || asset.desc).trim().replace(/[。，,.；;]+$/, '')
+  const desc = asset.prompt.trim().replace(/[。，,.；;]+$/, '')
   const style = project?.config.shotStyle?.trim() ?? ''
   return getPromptBook().templates[asset.kind === 'char' ? 'A' : 'B']
-    .split('{prompt；为空时用 description}').join(desc).split('{name}').join(asset.name)
+    .split('{prompt}').join(desc).split('{name}').join(asset.name)
     .split('\n').filter(line => style || !line.includes('{风格参考}')).map(line => line.split('{风格参考}').join(style)).join('\n')
 }
 export function buildVideoPrompt(shot: Shot, project: Project, dur: number): string {
   const refs = videoReferenceImages(shot, project)
   const mapping = Object.fromEntries(project.assets.map(a => [a.name, refs.find(r => r.assetId === a.id)?.label ?? a.name]))
-  const beats = timelineLines(shot.timeline).slice(0, 8).map(b => replaceMentions(b, mapping))
+  const replace = (text: string) => replaceMentions(text, mapping).replace(/@(?!图片\d+)/g, '')
+  const beats = timelineLines(shot.timeline).map(replace)
   let axis = timeAxis(beats, dur).map(([a, b, beat]) => `${fmtSeconds(a)}–${fmtSeconds(b)}秒：${beat.replace(/[。；;]+$/, '')}`).join('；')
   if (axis && !/[。！？”」]$/.test(axis)) axis += '。'
-  const values: Record<string, string | number> = { ...Object.fromEntries(SHOT_TEXT_FIELDS.map(k => [k, replaceMentions(shot[k].trim(), mapping)])), dur, '画幅': project.config.ratio, '时间轴': axis, '节奏提示': paceHint(dur, beats) }
+  const values: Record<string, string | number> = { ...Object.fromEntries(SHOT_TEXT_FIELDS.map(k => [k, replace(shot[k].trim())])), dur, '画幅': project.config.ratio, '时间轴': axis, '节奏提示': paceHint(dur, beats) }
   return getPromptBook().templates.C.split('\n').flatMap(line => {
     if (line.startsWith('风格：')) return [line.replace(/\{风格参考[^{}]*\}/g, () => project.config.shotStyle?.trim().replace(/。+$/, '') || '写实电影风格')]
     if (line.startsWith('参考图：')) {

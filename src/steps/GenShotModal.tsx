@@ -49,8 +49,8 @@ export default function GenShotModal({
   const segs = project.segments
   const [model, setModel] = useState<string>(MODELS.text)
   const [draft, setDraft] = useState(() => {
-    const pending = segs.filter((seg) => { const shot = project.shots.find((s) => s.segId === seg.id); return !shot || shot.outdated?.length })
-    const sel = initialSelection ?? (pending.length ? pending : segs).map((s) => s.no)
+    const pending = segs.filter((seg) => { const shot = project.shots.find((s) => s.segId === seg.id); return !shot || shot.outdated?.some(r => r.kind !== 'video') })
+    const sel = initialSelection ?? pending.map((s) => s.no)
     const durations = new Map(segs.map((seg) => [seg.id, seg.dur!]))
     return { sel, durations }
   })

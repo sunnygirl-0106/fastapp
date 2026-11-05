@@ -31,7 +31,6 @@ export interface Asset {
   name: string
   importance: Importance
   alias?: string
-  desc: string // 描述 / 设定（给人看）
   prompt: string // 图像提示词（发给 AI）
   imgState: ImgState
   imageUrl?: string // mock：一段 css 渐变或占位标识
@@ -59,13 +58,14 @@ export interface VideoVersion {
 }
 
 export interface ShotVideo {
+  // Read-only proposal fixtures may carry legacy metadata; runtime migration removes it.
+  [legacyField: string]: unknown
   state: GenStatus
   versions: VideoVersion[]
-  staleReason?: string
-  stale?: boolean // 镜头被重新生成后，旧视频标记为需重新生成
 }
 
-export type OutdatedKind = 'segText' | 'asset'
+// A: segText / asset affect shot design; B: video affects only the finished video.
+export type OutdatedKind = 'segText' | 'asset' | 'video'
 export interface OutdatedReason {
   kind: OutdatedKind
   key?: string
