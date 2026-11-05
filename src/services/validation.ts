@@ -144,6 +144,35 @@ export function mentions(text: string, names: string[]) {
   }
   return { found, unknown }
 }
+// Kept in parity with validation.py; editorial advice never rejects a model response.
+export const LENGTH_RANGES: Record<string, [number, number]> = {
+  shot: [150, 220], beat: [15, 40], action: [15, 30], anchor: [25, 50], motion: [20, 50],
+  blocking: [30, 70], subject: [0, 10], continuity: [30, 70], forbid: [30, 70], background: [30, 70],
+}
+const FIELD_NAMES: Record<string, string> = { shot: '画面描述', action: '主要动作', anchor: '场景位置', motion: '动作说明', blocking: '走位说明', subject: '画面主角', continuity: '连贯要求', forbid: '保持不变', background: '背景范围' }
+export const BANNED_WORDS = ['像', '仿佛', '宛如', '如同', '一般', '意识到', '心想', '感到', '疑惑', '慌乱', '不好意思', '紧张', '期待', '震惊', '不可置信', '暴雨如注', '宁静', '静谧', '温馨', '浓重', '氛围', '微微', '轻轻', '缓缓', '迅速', '瞬间', '猛地', '一点点', '随着', '接着', '然后', '此时', '与此同时', '紧接着']
+const BANNED_PATTERN = new RegExp(BANNED_WORDS.map(w => w === '像' ? '(?<![影图画雕肖录头好])像' : w).join('|'), 'gu')
+const QUOTED_TEXT = /“([^”\n]+)”|"([^"\n]+)"|「([^」\n]+)」|『([^』\n]+)』/g
+export const visibleLength = (text: string) => [...squash(text.replace(QUOTED_TEXT, ''))].length
+export function styleNotes(row: Row, label: string): string[] {
+  const notes: string[] = []
+  const items = SHOT_TEXT_FIELDS.map(f => [FIELD_NAMES[f], f, row[f]])
+  if (Array.isArray(row.timeline)) row.timeline.forEach((b: unknown, i: number) => items.push([`第 ${i + 1} 拍`, 'beat', b]))
+  for (const [name, key, text] of items) {
+    if (typeof text !== 'string') continue
+    let [low, high] = LENGTH_RANGES[key]
+    if (key === 'motion' && text.trim().replace(/。+$/, '') === '无位移') low = 0
+    const size = visibleLength(text)
+    if (size < low || size > high) notes.push(`${label} ${name}：${size} 字，建议 ${low}–${high} 字`)
+    const words = [...new Set(text.replace(QUOTED_TEXT, '').match(BANNED_PATTERN) ?? [])].sort()
+    if (words.length) notes.push(`${label} ${name}：出现禁用词 ${words.join('、')}`)
+  }
+  return notes
+}
+export function deriveAssetIds(row: Row, idByName: Map<string, string>): string[] {
+  const texts = [row.shot ?? '', ...(row.timeline ?? []), ...SHOT_TEXT_FIELDS.slice(1).map(f => row[f] ?? '')]
+  return [...new Set(texts.filter(t => typeof t === 'string').flatMap(t => mentions(t, [...idByName.keys()]).found.map(n => idByName.get(n)!)))]
+}
 const TIME_PATTERN = /(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百半]+)\s*(?:秒|分钟|分半|毫秒|seconds?\b|secs?\b|s\b)|\d+(?:\.\d+)?\s*[-–—~～至到]\s*\d+(?:\.\d+)?|\d+:\d+/i
 export function timingInstructions(beat: string, sourceText: string) {
   return beat.replace(/“([^”\n]+)”|"([^"\n]+)"|「([^」\n]+)」|『([^』\n]+)』/g, (match, a, b, c, d, offset) => /(?:[：:]|说|问|喊|道)\s*$/.test(beat.slice(0, offset)) && squash(sourceText).includes(squash(a ?? b ?? c ?? d)) ? '' : match)
@@ -158,6 +187,7 @@ export function validateShots(rows: Row[], segments: Row[], assets: Row[], targe
     if (!seg || !targets.includes(r.segment_ordinal)) errors.push(`${label}：segment_ordinal 不存在或不在本次范围内`)
     else { actual.set(r.segment_ordinal, (actual.get(r.segment_ordinal) ?? 0) + 1); label = `镜头（段 ${r.segment_ordinal}）` }
     textFields(r, [...SHOT_TEXT_FIELDS], label, errors)
+    notes.push(...styleNotes(r, label))
     if (!Array.isArray(r.timeline) || r.timeline.length < 2 || r.timeline.length > 8) errors.push(`${label}：timeline 必须有 2–8 拍`)
     else if (seg) {
       const [, low, high] = [[6,2,2],[10,2,3],[15,3,4],[20,4,5],[30,5,7]].find(([limit]) => seg.duration_seconds <= limit) ?? [30,5,7]

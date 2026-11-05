@@ -10,13 +10,16 @@ const result=spawnSync('python3',['-c',String.raw`
 import sys,json
 sys.path.insert(0,'../测试提示词效果')
 from prompts import PromptBook,time_axis,pace_hint,replace_mentions
-from validation import fix_total,clean_script,timing_instructions
+from validation import fix_total,clean_script,timing_instructions,derive_asset_ids,style_notes,visible_length
 book=PromptBook()
 beats=['抬头。','小雨说：“明天我们一起去看海好吗？”','点头。']
 segments=[dict(ordinal=1,title='走进房间',duration_seconds=15,text='小雨走进房间。')]
 assets=[dict(asset_id='a',kind='character',name='小雨',alias='',prompt='蓝色衣服。'),dict(asset_id='b',kind='scene',name='房间',alias='',prompt='明亮房间')]
 shot=dict(type='shot',segment_ordinal=1,shot='@小雨在@房间',timeline=beats,action='抬头',anchor='@房间窗边',motion='无明显位移',blocking='左侧',subject='@小雨',continuity='站位不变',forbid='禁止新增人物',background='木门',asset_ids=['a','b'])
-print(json.dumps(dict(systems=book.systems,users=book.users,templates=book.templates,segments=segments,assets=assets,shot=shot,segmentUser=book.segment_user('正文','manual',15),assetUser=book.asset_user(segments,'人物设定','3D 卡通'),shotUser=book.shot_user(segments,assets,'3D 卡通',existing=[shot],targets=[1]),stitched=book.stitch(segments,assets,[shot],'3D 卡通','9:16 竖屏'),axes=[time_axis(beats,n) for n in [4,15,30]],hints=[pace_hint(n,beats) for n in [4,15,30]],fixed=[fix_total([8,13,21],n) for n in range(12,91)],clean=clean_script('# **人物**\n\\【正文\\】')) ,ensure_ascii=False))
+samples=[shot,dict(shot='@房间的影像画像雕像肖像录像头像好像，仿佛@小雨心想：“紧张然后”',timeline=['@小雨妈妈缓缓转身','@小雨像风'],action='迅速',motion='无位移。',blocking='@小雨妈妈然后走入@房间',background='@陌生人'),dict(shot='𠮷😀 “台词不计数”',timeline=['「台词」','『对白』'],motion='无位移。。。')]
+id_by_name={'小雨':'a','房间':'b','小雨妈妈':'c'}
+parity=[dict(row=row,ids=derive_asset_ids(row,id_by_name),notes=style_notes(row,'镜头（段 1）')) for row in samples]
+print(json.dumps(dict(parity=parity,idByName=id_by_name,systems=book.systems,users=book.users,templates=book.templates,segments=segments,assets=assets,shot=shot,segmentUser=book.segment_user('正文','manual',15),assetUser=book.asset_user(segments,'人物设定','3D 卡通'),shotUser=book.shot_user(segments,assets,'3D 卡通',existing=[shot],targets=[1]),stitched=book.stitch(segments,assets,[shot],'3D 卡通','9:16 竖屏'),axes=[time_axis(beats,n) for n in [4,15,30]],hints=[pace_hint(n,beats) for n in [4,15,30]],fixed=[fix_total([8,13,21],n) for n in range(12,91)],clean=clean_script('# **人物**\n\\【正文\\】')) ,ensure_ascii=False))
 `],{encoding:'utf8'})
 assert.equal(result.status,0,result.stderr)
 const expected=JSON.parse(result.stdout)
@@ -27,6 +30,15 @@ try {
  const prompts=await server.ssrLoadModule('/src/services/prompts.ts'),video=await server.ssrLoadModule('/src/services/videoPrompt.ts'),validation=await server.ssrLoadModule('/src/services/validation.ts'),parse=await server.ssrLoadModule('/src/services/parse.ts')
  const project={config:{durMode:'manual',targetDur:15,shotStyle:'3D 卡通',ratio:'9:16 竖屏'},script:'正文',segments:expected.segments.map(s=>({id:'s'+s.ordinal,no:s.ordinal,title:s.title,text:s.text,dur:s.duration_seconds})),assets:expected.assets.map(a=>({id:a.asset_id,kind:a.kind==='character'?'char':'scene',name:a.name,alias:a.alias,prompt:a.prompt,imageUrl:'image-'+a.asset_id})),shots:[]}
  const shot={...expected.shot,id:'shot1',segId:'s1',no:1,dur:15,timeline:parse.formatTimeline(expected.shot.timeline),assetIds:['a','b']}
+ check('所有字段 derive_asset_ids 顺序、去重、最长名称与 Python 一致',()=>{
+   for(const sample of expected.parity) assert.deepEqual(validation.deriveAssetIds(sample.row,new Map(Object.entries(expected.idByName))),sample.ids)
+ })
+ check('style_notes 字数、台词排除、无位移、禁词豁免逐条与 Python 一致',()=>{
+   for(const sample of expected.parity) assert.deepEqual(validation.styleNotes(sample.row,'镜头（段 1）'),sample.notes)
+   const warnings=[],warn=console.warn;console.warn=x=>warnings.push(x)
+   try {validation.validateShots([structuredClone(expected.shot)],expected.segments,expected.assets,[1])} finally {console.warn=warn}
+   assert.ok(expected.parity[0].notes.every(note=>warnings.includes('[JSONL] '+note)))
+ })
  check('原文系统/用户模板/拼接模板',()=>{const book=prompts.getPromptBook();assert.deepEqual(book.systems,expected.systems);assert.deepEqual(book.users,expected.users);assert.deepEqual(book.templates,expected.templates)})
  check('三次用户消息',()=>{assert.equal(prompts.buildSegmentUserMessage(project),expected.segmentUser);assert.equal(prompts.buildAssetUserMessage(project.segments,'人物设定','3D 卡通'),expected.assetUser)
  // JSON whitespace is semantically irrelevant; the Python JSON encoder adds spaces.

@@ -1,4 +1,4 @@
-import OutdatedChip from '@/components/OutdatedChip'
+import OutdatedBadge from '@/components/OutdatedBadge'
 import SegmentConfirmModal from './SegmentConfirmModal'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
@@ -116,11 +116,10 @@ export default function Step2Segments({ project }: { project: Project }) {
       <div className="space-y-3">
         {segs.map((s) => (
           <ParagraphCard
-            project={project}
             key={s.id}
             seg={s}
             shot={project.shots.find((shot) => shot.segId === s.id)}
-            onUpdate={(patch, options) => updateSegment(s.id, patch, options)}
+            onUpdate={(patch) => updateSegment(s.id, patch)}
             onRenameTitle={(v) => updateSegmentTitle(s.id, v)}
             onDelete={() => setConfirmDel(s)}
             durationDisabled={project.shotStatus === 'generating'}
@@ -237,7 +236,6 @@ function BottomBar({
 
 /* ---------- 段落卡片 ---------- */
 function ParagraphCard({
-  project,
   seg,
   shot,
   onUpdate,
@@ -246,12 +244,11 @@ function ParagraphCard({
   durationDisabled,
   onDurationPreview,
 }: {
-  project: Project
   durationDisabled: boolean
   onDurationPreview: (dur: number | undefined) => void
   seg: Segment
   shot?: Shot
-  onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>, options?: { silent?: boolean }) => void
+  onUpdate: (patch: Partial<Pick<Segment, 'text' | 'dur'>>) => void
   onRenameTitle: (v: string) => void
   onDelete: () => void
 }) {
@@ -259,6 +256,7 @@ function ParagraphCard({
   const [open, setOpen] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const bodyRef = useRef<HTMLParagraphElement>(null)
+  const pending = !!shot?.outdated?.length
 
   // 检测原文是否超过收起高度，决定是否显示底部渐隐提示
   useLayoutEffect(() => {
@@ -290,7 +288,7 @@ function ParagraphCard({
             {seg.title}
           </button>
         )}
-        {!!shot?.outdated?.length && <OutdatedChip shot={shot} project={project} />}
+        {shot && pending && <OutdatedBadge label={`镜头 ${no2(shot.no)} 待更新`} title={shot.outdated?.map(r => r.text).join('\n')} />}
         <div className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <DurationStepper value={seg.dur!} variant="inline" size="sm" title={`段落 ${no2(seg.no)} 时长`}
             disabled={durationDisabled} disabledTooltip=""
@@ -327,7 +325,7 @@ function ParagraphCard({
         </button>
 
         {/* 展开态：自动保存编辑浮层 */}
-        {open && <SegmentTextEditor seg={seg} shot={shot} onSave={(text, silent) => onUpdate({ text }, { silent })} onClose={() => setOpen(false)} />}
+        {open && <SegmentTextEditor seg={seg} shot={shot} onSave={(text) => onUpdate({ text })} onClose={() => setOpen(false)} />}
 
       </div>
     </div>
@@ -403,16 +401,14 @@ function AddSegModal({
 }
 
 
-function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?: Shot; onSave: (text: string, silent: boolean) => void; onClose: () => void }) {
+function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?: Shot; onSave: (text: string) => void; onClose: () => void }) {
   const [text, setText] = useState(seg.text)
-  const [silent, setSilent] = useState(false)
-  // Keep this edit together until closing so the checkbox also covers text typed before it was checked.
-  const pending = useRef({ text, silent, onSave })
-  pending.current = { text, silent, onSave }
+  const pending = useRef({ text, onSave })
+  pending.current = { text, onSave }
   const saved = useRef(seg.text)
   const flush = () => {
     const latest = pending.current
-    if (latest.text !== saved.current) { latest.onSave(latest.text, latest.silent); saved.current = latest.text }
+    if (latest.text !== saved.current) { latest.onSave(latest.text); saved.current = latest.text }
   }
   useEffect(() => () => flush(), [])
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -432,7 +428,6 @@ function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?
       <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => setText(e.target.value)} className="max-h-[360px] min-h-24 w-full resize-none bg-transparent text-[13px] leading-relaxed text-white/90 outline-none" />
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-2 text-xs">
         <span className="shrink-0 text-white/40">收起时自动保存</span>
-        {shot && <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" className="accent-brand" checked={silent} onChange={(e) => setSilent(e.target.checked)} />只改了错别字，不需要更新镜头 {no2(shot.no)}</label>}
         <button onClick={close} className="text-white/60 hover:text-white">收起</button>
       </div>
     </div>

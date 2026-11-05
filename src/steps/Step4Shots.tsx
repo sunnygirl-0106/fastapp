@@ -1,9 +1,11 @@
-import OutdatedChip from '@/components/OutdatedChip'
+import ShotTextEditor from '@/components/ShotTextEditor'
+import { styleNotes } from '@/services/validation'
+import OutdatedBadge from '@/components/OutdatedBadge'
 import MentionText from '@/components/MentionText'
-import { timelineLines, formatTimeline } from '@/services/parse'
+import { timelineLines } from '@/services/parse'
 import DurationStepper from '@/components/DurationStepper'
 import NoticeBar from '@/components/NoticeBar'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
@@ -90,12 +92,6 @@ const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?
 // 默认可见列：画面与节奏 + 人物与空间（共 7 列）；「更多设定」默认隐藏，可在「字段」里开启
 const DEFAULT_VISIBLE_FIELDS = SHOT_GROUPS.slice(0, 2).flatMap((g) => g.fields)
 
-// 按实际时间槽展示；容器 min-height 保持稳定行高。
-function parseTimeline(raw: string): string[] {
-  const lines = formatTimeline(timelineLines(raw ?? '')).split('\n')
-  return lines
-}
-
 // 模糊匹配：先看是否包含子串，再退化为顺序子序列匹配
 function fuzzy(needle: string, hay: string): boolean {
   const n = String(needle ?? '').toLowerCase().replace(/\s+/g, '')
@@ -146,6 +142,7 @@ export default function Step4Shots({ project }: { project: Project }) {
   const [durationPreview, setDurationPreview] = useState<Record<string, number | undefined>>({})
   const [genOpen, setGenOpen] = useState(false)
   const [sel, setSel] = useState<string[]>([])
+  const selectionHistory = useRef<{ projectId: string; shots: Map<string, { missingVideo: boolean; reasons: string }> }>({ projectId: '', shots: new Map() })
   const [detailId, setDetailId] = useState<string | null>(null)
   const [deleteFor, setDeleteFor] = useState<Shot | null>(null)
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
@@ -200,12 +197,32 @@ export default function Step4Shots({ project }: { project: Project }) {
     setDraftValue('')
   }
 
-  // 镜头生成完成后，默认选中所有尚未生成视频（或已失效）的镜头
+  // Select new work once; unrelated edits must not undo a manual deselection.
   useEffect(() => {
     if (st !== 'done') return
-    setSel(shots.filter((s) => !s.video.versions.length || s.outdated?.length).map((s) => s.id))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st, shots.length])
+    const history = selectionHistory.current
+    const sameProject = history.projectId === project.id
+    const next = new Map(shots.map(s => [s.id, { missingVideo: !s.video.versions.length, reasons: JSON.stringify(s.outdated ?? []) }]))
+    setSel(previous => {
+      const selected = new Set(sameProject ? previous.filter(id => next.has(id)) : [])
+      next.forEach((value, id) => {
+        const before = sameProject ? history.shots.get(id) : undefined
+        if ((value.missingVideo && !before?.missingVideo) || (value.reasons !== '[]' && value.reasons !== before?.reasons)) selected.add(id)
+      })
+      return [...selected]
+    })
+    selectionHistory.current = { projectId: project.id, shots: next }
+  }, [project.id, st, shots])
+
+  const ignore = (id: string) => {
+    useStore.getState().dismissOutdated(id)
+    setSel(selected => selected.filter(value => value !== id))
+  }
+  const ignoreAll = () => {
+    const ids = new Set(pending.map(s => s.id))
+    useStore.getState().dismissAllOutdated()
+    setSel(selected => selected.filter(id => !ids.has(id)))
+  }
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
@@ -230,7 +247,10 @@ export default function Step4Shots({ project }: { project: Project }) {
     <div>
       <PageHeader
         title="镜头设计"
-        desc={`已生成 ${shots.length} 个镜头 · ${project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计` : '预计成片时长约'} ${shots.reduce((n, s) => n + (durationPreview[s.id] ?? project.segments.find((seg) => seg.id === s.segId)?.dur ?? s.dur), 0)} 秒`}
+        desc={<>
+          {`已生成 ${shots.length} 个镜头 · ${project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计` : '预计成片时长约'} ${shots.reduce((n, s) => n + (durationPreview[s.id] ?? project.segments.find((seg) => seg.id === s.segId)?.dur ?? s.dur), 0)} 秒`}
+          {missing.length > 0 && <span className="ml-2 inline-flex flex-wrap items-center gap-2"><span className="text-white/20">|</span>{missing.length} 个段落尚未生成镜头<button disabled={!!blocked} title={blocked} className="text-brand hover:text-brand-light disabled:opacity-40" onClick={() => openGeneration(missing.map(s => s.no))}>去生成</button></span>}
+        </>}
         right={<>
 
           <PillOutline disabled={!!blocked} title={blocked} onClick={() => openGeneration()}>重新生成镜头</PillOutline>
@@ -327,12 +347,6 @@ export default function Step4Shots({ project }: { project: Project }) {
         )}
       </div>
 
-      {pending.length > 0 && <NoticeBar actions={[
-        { label: '全部保留', variant: 'text', onClick: () => useStore.getState().dismissAllOutdated() },
-      ]}>
-        {pending.length} 个镜头待更新
-      </NoticeBar>}
-      {missing.length > 0 && <NoticeBar tone="neutral" action="去生成" disabled={!!blocked} title={blocked} onAction={() => openGeneration(missing.map((s) => s.no))}>{missing.length === 1 ? `段落 ${no2(missing[0].no)} 尚未生成镜头` : `${missing.length} 个段落尚未生成镜头`}</NoticeBar>}
       {/* 表格：统一深色表格（对齐设计稿）——列少自适应铺满、列多横向滚动 */}
       <div ref={scrollRef} className="table-scroll overflow-x-auto rounded-lg border border-white/10 bg-card">
         <div className="w-full min-w-[720px]">
@@ -397,7 +411,7 @@ export default function Step4Shots({ project }: { project: Project }) {
                   flash={flashId === s.id}
                   onDurationPreview={(dur) => setDurationPreview((prev) => prev[s.id] === dur ? prev : { ...prev, [s.id]: dur })}
                   onToggleSelect={() => toggle(s.id)}
-                  onRegenerateVideo={() => setVideoConfirm([s.id])}
+                  onIgnore={() => ignore(s.id)}
                   onCommit={(patch) => useStore.getState().updateShot(s.id, patch)}
                   onMenu={(e) => {
                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -410,7 +424,14 @@ export default function Step4Shots({ project }: { project: Project }) {
         </div>
       </div>
 
-      <ActionBar left={`已选择 ${sel.length}/${shots.length} 个镜头，可取消个别镜头`}>
+      <ActionBar left={<div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span>已选择 {sel.length}/{shots.length} 个镜头</span>
+        {pending.length > 0 ? <>
+          <span className="text-[#5d646a]">·</span>
+          <span className="text-[#7c838a]">其中 {pending.filter(s => sel.includes(s.id)).length} 个因{pending.every(s => s.outdated?.every(r => r.kind === 'segText')) ? '剧本改动' : '内容改动'}待更新</span>
+          <button type="button" className="text-white/35 transition-colors hover:text-white/70" onClick={ignoreAll}>全部忽略</button>
+        </> : <span className="text-[#7c838a]">，可取消个别镜头</span>}
+      </div>}>
         <PillCTA disabled={!sel.length} onClick={() => setVideoConfirm(sel)}>
           {sel.length ? (
             <>
@@ -425,7 +446,7 @@ export default function Step4Shots({ project }: { project: Project }) {
 
       {/* 右侧详情面板：key 切换镜头时重挂载，卸载前自动 flush */}
       {detailShot && (
-        <ShotDetailDrawer key={detailShot.id} shot={detailShot} onClose={() => setDetailId(null)} />
+        <ShotDetailDrawer key={detailShot.id} assets={project.assets} shot={detailShot} onClose={() => setDetailId(null)} />
       )}
 
       {/* 重新生成镜头（不切页） */}
@@ -559,7 +580,7 @@ function ShotRow({
   flash,
   onDurationPreview,
   onToggleSelect,
-  onRegenerateVideo,
+  onIgnore,
   onCommit,
   onMenu,
 }: {
@@ -573,7 +594,7 @@ function ShotRow({
   flash?: boolean
   onDurationPreview: (dur: number | undefined) => void
   onToggleSelect: () => void
-  onRegenerateVideo: () => void
+  onIgnore: () => void
   onCommit: (patch: Partial<Shot>) => void
   onMenu: (e: React.MouseEvent) => void
 }) {
@@ -598,7 +619,7 @@ function ShotRow({
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
           {vi.text}
         </span>
-        {!!shot.outdated?.length && <OutdatedChip shot={shot} project={project} onRegenerateVideo={onRegenerateVideo} />}
+        {!!shot.outdated?.length && <OutdatedBadge title={shot.outdated.map(r => r.text).join('\n')} onIgnore={onIgnore} ignoreLabel={`忽略镜头 ${no2(shot.no)} 的改动`} />}
       </div>
 
       <ShotDurationCell project={project} shot={shot} onPreview={onDurationPreview} />
@@ -607,14 +628,18 @@ function ShotRow({
       {cols.map((c) => (
         <InlineCellEditor
           key={c.key}
+          field={c.key}
+          assets={project.assets}
+          assetIds={shot.assetIds ?? []}
           value={c.key === 'timeline' ? timelineLines(shot.timeline).join('\n') : String(shot[c.key] ?? '')}
           onCommit={(v) => onCommit({ [c.key]: v } as Partial<Shot>)}
           readView={
             c.key === 'timeline' ? (
               <div className="min-h-[60px] space-y-1">
-                {parseTimeline(shot.timeline).map((line, i) => (
-                  <div key={i} className="line-clamp-1 text-white/80">
-                    <MentionText text={line || ' '} assets={project.assets} />
+                {timelineLines(shot.timeline).map((line, i) => (
+                  <div key={i} className="flex items-start gap-2 text-white/80">
+                    <span className="w-7 shrink-0 select-none text-right text-white/40">{i < 20 ? String.fromCodePoint(0x2460 + i) : `${i + 1}.`}</span>
+                    <span className="min-w-0 whitespace-pre-wrap break-words"><MentionText text={line || ' '} assets={project.assets} /></span>
                   </div>
                 ))}
               </div>
@@ -798,10 +823,14 @@ function FilterPreview({
 
 /* ---------- 单元格就地编辑：点击后原地浮出编辑框，停输入自动保存 ---------- */
 function InlineCellEditor({
+  field, assets, assetIds,
   value,
   onCommit,
   readView,
 }: {
+  field: keyof Shot
+  assets: Project['assets']
+  assetIds: string[]
   value: string
   onCommit: (v: string) => void
   readView: React.ReactNode
@@ -809,23 +838,7 @@ function InlineCellEditor({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
-  const ref = useRef<HTMLTextAreaElement>(null)
   const { status, schedule, flush } = useAutoSave((v) => onCommit(v))
-
-  const fit = (el: HTMLTextAreaElement) => {
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 132), 360)}px`
-  }
-
-  useEffect(() => {
-    if (!editing) return
-    const el = ref.current
-    if (el) {
-      fit(el)
-      el.focus()
-      el.setSelectionRange(el.value.length, el.value.length)
-    }
-  }, [editing])
 
   const start = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -851,29 +864,17 @@ function InlineCellEditor({
           <div
             className="absolute flex flex-col overflow-hidden rounded-xl border border-brand/55 bg-panel shadow-2xl ring-1 ring-brand/15"
             style={{
-              top: rect.top - 6,
-              left: Math.max(8, Math.min(rect.left - 6, window.innerWidth - rect.width - 20)),
-              width: Math.max(rect.width + 12, 320),
+              top: Math.max(8, Math.min(rect.top - 6, window.innerHeight - 450)),
+              left: Math.max(8, Math.min(rect.left - 6, window.innerWidth - Math.max(rect.width + 12, 320) - 8)),
+              width: Math.min(window.innerWidth - 16, Math.max(rect.width + 12, 320)),
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <textarea
-              ref={ref}
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value)
-                fit(e.target)
-                schedule(e.target.value)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  close()
-                }
-              }}
-              className="w-full resize-none bg-transparent px-4 py-3 text-[13.5px] leading-relaxed text-white/90 outline-none placeholder:text-faint"
-              placeholder="填写该镜头字段…"
-            />
+            <div className="max-h-[360px] min-h-[132px] overflow-auto px-4 py-3 text-[13.5px] leading-relaxed text-white/90" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
+              <ShotTextEditor value={draft} timeline={field === 'timeline'} assets={assets} assetIds={assetIds} label={labelOf(field)} autoFocus onEscape={close}
+                onChange={v => { setDraft(v); schedule(v) }} />
+              <FieldNotes field={field} value={draft} />
+            </div>
             <div className="flex items-center justify-between border-t border-line/60 px-4 py-2">
               <span className="text-[12px] text-faint">自动保存</span>
               <SaveBadge status={status} />
@@ -886,14 +887,14 @@ function InlineCellEditor({
 }
 
 /* ---------- 右侧详情面板：分组字段 + 更多设定折叠；全自动保存，无保存按钮 ---------- */
-function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }) {
+function ShotDetailDrawer({ shot, assets, onClose }: { shot: Shot; assets: Project['assets']; onClose: () => void }) {
   const updateShot = useStore((s) => s.updateShot)
   const [draft, setDraft] = useState<Record<string, string>>(() => snapshot(shot))
   const draftRef = useRef(draft)
   draftRef.current = draft
   const [moreOpen, setMoreOpen] = useState(false)
 
-  const { status, schedule } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
+  const { status, schedule, flush } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
 
   const setField = (k: keyof Shot, v: string) => {
     setDraft((d) => {
@@ -905,7 +906,7 @@ function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }
   }
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => !e.isComposing && e.keyCode !== 229 && e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -914,12 +915,10 @@ function ShotDetailDrawer({ shot, onClose }: { shot: Shot; onClose: () => void }
   const renderField = (k: keyof Shot) => (
     <div key={k} className="flex flex-col gap-2">
       <div className="text-[14px] leading-[18px] text-white/60">{labelOf(k)}</div>
-      <textarea
-        rows={k === 'timeline' || k === 'shot' || k === 'motion' ? 3 : 2}
-        value={draft[k]}
-        onChange={(e) => setField(k, e.target.value)}
-        className="w-full resize-none rounded-md border border-white/10 bg-card px-3 py-3.5 text-[14px] leading-relaxed text-white/90 outline-none transition-colors placeholder:text-white/30 focus:border-brand/50"
-      />
+      <div className="rounded-md border border-white/10 bg-card px-3 py-3.5 text-[14px] leading-relaxed text-white/90 focus-within:border-brand/50" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
+        <ShotTextEditor value={draft[k]} timeline={k === 'timeline'} assets={assets} assetIds={shot.assetIds ?? []} label={labelOf(k)} onChange={v => setField(k, v)} onEscape={onClose} />
+      </div>
+      <FieldNotes field={k} value={draft[k]} />
     </div>
   )
 
@@ -990,4 +989,10 @@ function ShotDurationCell({ project, shot, onPreview }: { project: Project; shot
         if (seg) useStore.getState().updateSegment(seg.id, { dur })
       }} />
   </div>
+}
+
+// These are advice only, shared with model validation and refreshed as the draft changes.
+function FieldNotes({ field, value }: { field: keyof Shot; value: string }) {
+  const notes = styleNotes(field === 'timeline' ? { timeline: timelineLines(value) } : { [field]: value }, '')
+  return notes.length ? <div className="mt-2 space-y-1 text-xs leading-relaxed text-white/40" role="status">{notes.map(note => <div key={note}>{note.trim()}</div>)}</div> : null
 }

@@ -10,7 +10,7 @@ import { parseSegments, parseAssets, parseShots, formatTimeline, timelineLines }
 import { mockSegments, mockAssets, mockShots } from '@/services/mockText'
 import { getPromptBook, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from '@/services/prompts'
 import { validatedText, TextModelError } from '@/services/textModel'
-import { cleanScript, splitPreface } from '@/services/validation'
+import { cleanScript, splitPreface, deriveAssetIds } from '@/services/validation'
 import { renameText, mentionParts } from '@/utils/mentions'
 import { buildVideoPrompt, videoReferenceImages } from '@/services/videoPrompt'
 
@@ -82,7 +82,7 @@ interface State {
 
   // step2 拆解
   addSegment: (title: string, text: string, dur: number) => void
-  updateSegment: (id: string, patch: Partial<Pick<Segment, 'title' | 'text' | 'dur'>>, options?: { silent?: boolean }) => void
+  updateSegment: (id: string, patch: Partial<Pick<Segment, 'title' | 'text' | 'dur'>>) => void
   dismissOutdated: (id: string) => void
   dismissAllOutdated: () => void
   renameAsset: (id: string, name: string, sync: boolean) => void
@@ -471,7 +471,7 @@ export const useStore = create<State>((set, get) => {
       get().showToast('已新增剧本段落')
     },
     updateSegmentTitle: (id, title) => get().updateSegment(id, { title }),
-    updateSegment: (id, patch, options) => {
+    updateSegment: (id, patch) => {
       let message = ''
       patchProject((p) => {
         const seg = p.segments.find((s) => s.id === id)
@@ -483,18 +483,16 @@ export const useStore = create<State>((set, get) => {
         if (patch.title?.trim()) seg.title = patch.title.trim()
         if (textChanged) {
           seg.text = patch.text!
-          if (!options?.silent) {
-            const reason: OutdatedReason = { kind: 'segText', text: '段落原文已修改' }
-            if (shot) markOutdated(p, [shot.id], reason)
-            queueShotReason(p, [id], reason)
-          }
+          const reason: OutdatedReason = { kind: 'segText', text: '段落原文已修改' }
+          if (shot) markOutdated(p, [shot.id], reason)
+          queueShotReason(p, [id], reason)
         }
         seg.dur = dur
         if (durChanged && shot) {
           shot.dur = dur!
           markDurationOutdated(shot, p)
         }
-        if (textChanged) message = !options?.silent && shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
+        if (textChanged) message = shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
       })
       if (message) get().showToast(message)
     },
@@ -643,6 +641,11 @@ export const useStore = create<State>((set, get) => {
         const s = p.shots.find((x) => x.id === id)
         if (!s) return
         if (patch.timeline !== undefined) patch = { ...patch, timeline: formatTimeline(timelineLines(patch.timeline)) }
+        const textEdit = SHOT_FIELDS.some(({ key }) => key in patch)
+        if (textEdit) {
+          const next = { ...s, ...patch }
+          patch = { ...patch, assetIds: deriveAssetIds({ ...next, timeline: timelineLines(next.timeline) }, new Map(p.assets.map(a => [a.name, a.id]))) }
+        }
         // 只在值真的变化时写入，避免 blur 空提交误标待更新
         const changed = Object.entries(patch).some(
           ([k, v]) => String(s[k as keyof Shot] ?? '') !== String(v ?? ''),
@@ -650,7 +653,7 @@ export const useStore = create<State>((set, get) => {
         if (!changed) return
         Object.assign(s, patch)
         // 镜头内容变了，已有视频失效
-        if (SHOT_FIELDS.some(({ key }) => key in patch)) markVideoOutdated(p, [id], '镜头描述已修改')
+        if (textEdit) markVideoOutdated(p, [id], '镜头描述已修改')
       })
     },
 

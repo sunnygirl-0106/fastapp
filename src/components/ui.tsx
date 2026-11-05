@@ -359,7 +359,7 @@ export function PageHeader({
   badge,
 }: {
   title: string
-  desc?: string
+  desc?: ReactNode
   right?: ReactNode
   badge?: ReactNode
 }) {

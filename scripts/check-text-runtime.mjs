@@ -47,6 +47,7 @@ try {
   check('未补齐参考图时 store 也拒绝首次镜头生成',()=>assert.equal(calls.length,beforeCalls))
   await s().generateAssetImages(p().assets.map(a=>a.id))
   const shotInput=structuredClone(p());handler=()=>response(mock.mockShots(shotInput,[1]).text);await s().startShots([1],{s1:22})
+  check('字数和禁词提示不会额外调用模型或阻止成功',()=>{assert.equal(calls.length,beforeCalls+1);assert.equal(p().shotStatus,'done');assert.equal(p().shots.length,1)})
   check('镜头消息使用确认后的时长和第 1 步风格',()=>{const user=calls.at(-1).body.messages[1].content;assert.match(user,/（22秒）/);assert.match(user,/风格参考：3D 卡通/)})
   reset()
   const many={...structuredClone(seed),segments:Array.from({length:13},(_,i)=>({...seed.segments[i%3],id:'s'+(i+1),no:i+1})),shots:[]}
