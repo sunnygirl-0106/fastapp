@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, Maximize, Pause, Play, Volume2, VolumeX, X } from 'lucide-react'
 import type { Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
-import { no2, preferredVersion } from '@/utils/project'
+import { no2, currentVersion, videoDownloads, videoDownloadToast } from '@/utils/project'
+import VideoVersionSelect from './VideoVersionSelect'
 import videoPoster from '@/assets/placeholders/frame-5.jpg'
 
 const SPEEDS = [0.5, 1, 1.5, 2]
@@ -20,8 +21,9 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
 
   // 同一镜头的多个版本在这里切换查看；默认打开当前版本
   const versions = shot.video.versions
-  const [tag, setTag] = useState(() => preferredVersion(shot.video)?.tag)
-  const active = versions.find((v) => v.tag === tag) ?? versions[versions.length - 1]
+  const setCurrentVersion = useStore(s => s.setCurrentVideoVersion)
+  const active = currentVersion(shot.video)
+  useEffect(() => { setT(0) }, [active?.tag])
   const url = active?.url
   const DURATION = active?.dur ?? shot.dur
 
@@ -40,7 +42,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
-      if (e.key === ' ') { e.preventDefault(); setPlaying((p) => !p) }
+      if (e.key === ' ' && !(e.target instanceof HTMLElement && e.target.closest('button, input, [role="menu"]'))) { e.preventDefault(); setPlaying((p) => !p) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -64,36 +66,19 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
       <div
         ref={containerRef}
-        className="flex max-h-[90vh] w-[1120px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)]"
+        className="flex max-h-[90vh] w-[70rem] max-w-[94vw] flex-col overflow-hidden dialog-surface rounded-2xl border"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 头部：标题 + 关闭 */}
         <div className="flex h-16 shrink-0 items-center gap-4 border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">镜头 {no2(shot.no)}</div>
-          {versions.length > 0 && (
-            <div className="inline-flex items-center gap-0.5 rounded-[10px] border border-white/10 bg-black/30 p-1">
-              {versions.map((v) => (
-                <button
-                  key={v.tag}
-                  onClick={() => { setTag(v.tag); setT(0) }}
-                  title={`查看 ${v.tag}`}
-                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium leading-none transition-colors ${
-                    v.tag === active?.tag
-                      ? 'bg-brand/15 text-brand'
-                      : 'text-white/45 hover:bg-white/5 hover:text-white/80'
-                  }`}
-                >
-                  {v.tag}
-                </button>
-              ))}
-            </div>
-          )}
+          <VideoVersionSelect versions={versions} value={active?.tag} onChange={tag => setCurrentVersion(shot.id, tag)} />
           <button
             className="ml-auto text-white/50 transition-colors hover:text-white"
             onClick={onClose}
             aria-label="关闭"
           >
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
@@ -107,15 +92,15 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
         </div>
 
         {/* 控制条：播放/时间/进度 + 音量/速度/下载/全屏 */}
-        <div className="flex h-[52px] shrink-0 items-center gap-3 px-4">
+        <div className="flex h-[3.25rem] shrink-0 items-center gap-3 px-4">
           <button
             className="text-white/90 transition-colors hover:text-white"
             onClick={() => setPlaying((p) => !p)}
             title={playing ? '暂停' : '播放'}
           >
-            {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+            {playing ? <Pause size="1.25rem" fill="currentColor" /> : <Play size="1.25rem" fill="currentColor" />}
           </button>
-          <span className="text-[12px] tabular-nums text-white/60">
+          <span className="text-[0.75rem] tabular-nums text-white/60">
             {mmss(t)} / {mmss(DURATION)}
           </span>
           <div className="group relative h-1 flex-1 cursor-pointer rounded-full bg-white/20" onClick={seek}>
@@ -129,13 +114,13 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
           <div className="flex items-center gap-4 text-white/70">
             {/* 音量 */}
             <button className="transition-colors hover:text-white" onClick={() => setMuted((m) => !m)} title="音量">
-              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              {muted ? <VolumeX size="1.125rem" /> : <Volume2 size="1.125rem" />}
             </button>
 
             {/* 播放速度 */}
             <div className="relative">
               <button
-                className="text-[13px] font-medium transition-colors hover:text-white"
+                className="text-[0.8125rem] font-medium transition-colors hover:text-white"
                 onClick={() => setSpeedOpen((o) => !o)}
                 title="播放速度"
               >
@@ -146,7 +131,7 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
                   {SPEEDS.map((s) => (
                     <button
                       key={s}
-                      className={`block w-16 px-3 py-1 text-left text-[13px] hover:bg-white/5 ${s === rate ? 'text-brand' : 'text-white/80'}`}
+                      className={`block w-16 px-3 py-1 text-left text-[0.8125rem] hover:bg-white/5 ${s === rate ? 'text-brand' : 'text-white/80'}`}
                       onClick={() => { setRate(s); setSpeedOpen(false) }}
                     >
                       {s}x
@@ -157,13 +142,13 @@ export default function VideoPlayer({ shot, onClose }: { shot: Shot; onClose: ()
             </div>
 
             {/* 下载 */}
-            <button className="transition-colors hover:text-white" onClick={() => showToast('已开始下载（示意）')} title="下载">
-              <Download size={18} />
+            <button className="transition-colors hover:text-white" onClick={() => showToast(videoDownloadToast(videoDownloads([shot])))} title="下载">
+              <Download size="1.125rem" />
             </button>
 
             {/* 全屏 */}
             <button className="transition-colors hover:text-white" onClick={toggleFullscreen} title="全屏">
-              <Maximize size={18} />
+              <Maximize size="1.125rem" />
             </button>
           </div>
         </div>

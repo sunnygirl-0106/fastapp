@@ -3,9 +3,9 @@ import { uid } from './generation'
 import { parseJsonl, validateSegments, validateAssets, validateShots, ValidationError } from './validation'
 export { ValidationError } from './validation'
 export const jsonl = (rows: object[]) => rows.map(row => JSON.stringify(row)).join('\n')
-export const BEAT_NUMBER = /^\s*(?:[①-⑳]|\d+\s*[.．、)）]|[（(]\d+[)）])\s*/
-export const timelineLines = (timeline: string): string[] => timeline.split('\n').map(line => line.replace(BEAT_NUMBER, '').trim()).filter(Boolean)
-export const formatTimeline = (lines: string[]) => lines.map((line, i) => `${i < 20 ? String.fromCodePoint(0x2460 + i) : `${i + 1}.`} ${line.replace(BEAT_NUMBER, '').trim()}`).join('\n')
+import { BEAT_NUMBER, timelineLines, readBeat } from '@/utils/timeline'
+export { BEAT_NUMBER, timelineLines } from '@/utils/timeline'
+export const formatTimeline = (lines: string[]) => lines.map((line, i) => readBeat(line) ? line.replace(BEAT_NUMBER, '').trim() : `${i < 20 ? String.fromCodePoint(0x2460 + i) : `${i + 1}.`} ${line.replace(BEAT_NUMBER, '').trim()}`).join('\n')
 function validated<T>(raw: string, parse: () => T): T {
   try { return parse() } catch (error) { if (error instanceof ValidationError) error.raw = raw; throw error }
 }

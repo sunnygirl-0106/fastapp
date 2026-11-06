@@ -1,4 +1,4 @@
-import doc from '../../../测试提示词效果/全自动工作流提示词.md?raw'
+import doc from '@prompt-book?raw'
 import type { Project, Segment, Shot } from '@/types'
 import { encodeShot } from './parse'
 import { stripUnknownMentions } from '@/utils/mentions'

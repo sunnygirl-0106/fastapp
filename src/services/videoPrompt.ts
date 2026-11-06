@@ -1,27 +1,11 @@
+import { normalizeBeats, writeBeat } from '@/utils/timeline'
 import type { Asset, Project, Shot, VideoReferenceImage } from '@/types'
 import { timelineLines } from './parse'
 import { getPromptBook } from './prompts'
-import { roundEven, SHOT_TEXT_FIELDS } from './validation'
+import { SHOT_TEXT_FIELDS } from './validation'
 export const fmtSeconds = (value: number) => String(Number(value.toFixed(6)))
 export function timeAxis(beats: string[], dur: number): [number, number, string][] {
-  if (!beats.length) return []
-  const minimums = beats.map(beat => {
-    const chars = [...beat.matchAll(/“([^”]*)”/g)].reduce((n, m) => n + [...m[1].replace(/\s/g, '')].length, 0)
-    return chars ? chars / 4 + 0.5 : 1.5
-  })
-  const total = minimums.reduce((a, b) => a + b, 0)
-  const lengths = minimums.map(m => total <= dur ? m + (dur - total) / beats.length : m * dur / total)
-  // Hand-edited timelines may exceed the model's 8-beat limit. When a
-  // half-second grid cannot fit every beat, use continuous weighted bounds.
-  const dense = dur < beats.length * 0.5
-  const bounds = [0]
-  let cumulative = 0
-  lengths.slice(0, -1).forEach((length, i) => {
-    cumulative += length
-    bounds.push(dense ? cumulative : Math.min(Math.max(roundEven(cumulative * 2) / 2, bounds[bounds.length - 1] + 0.5), dur - 0.5 * (beats.length - i - 1)))
-  })
-  bounds.push(dur)
-  return beats.map((beat, i) => [bounds[i], bounds[i + 1], beat])
+  return normalizeBeats(beats, dur).map(b => [b.start, b.end, b.text])
 }
 export function paceHint(dur: number, beats: string[]) {
   const per = dur / Math.max(beats.length, 1)
@@ -50,7 +34,7 @@ export function buildVideoPrompt(shot: Shot, project: Project, dur: number): str
   const mapping = Object.fromEntries(project.assets.map(a => [a.name, refs.find(r => r.assetId === a.id)?.label ?? a.name]))
   const replace = (text: string) => replaceMentions(text, mapping).replace(/@(?!图片\d+)/g, '')
   const beats = timelineLines(shot.timeline).map(replace)
-  let axis = timeAxis(beats, dur).map(([a, b, beat]) => `${fmtSeconds(a)}–${fmtSeconds(b)}秒：${beat.replace(/[。；;]+$/, '')}`).join('；')
+  let axis = normalizeBeats(beats, dur).map(b => writeBeat({ ...b, text: b.text.replace(/[。；;]+$/, '') })).join('；')
   if (axis && !/[。！？”」]$/.test(axis)) axis += '。'
   const values: Record<string, string | number> = { ...Object.fromEntries(SHOT_TEXT_FIELDS.map(k => [k, replace(shot[k].trim())])), dur, '画幅': project.config.ratio, '时间轴': axis, '节奏提示': paceHint(dur, beats) }
   return getPromptBook().templates.C.split('\n').flatMap(line => {

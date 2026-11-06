@@ -22,7 +22,7 @@ export default function OutdatedChip({ shot, project, onRegenerateVideo }: {
       e.stopPropagation()
       const r = e.currentTarget.getBoundingClientRect()
       setAnchor({ top: Math.min(r.bottom + 6, window.innerHeight - 280), left: r.left })
-    }}><AlertTriangle size={12} />待更新</button>
+    }}><AlertTriangle size="0.75rem" />待更新</button>
     {anchor && <Popover anchor={anchor} width={360} onClose={() => setAnchor(null)}><div className="space-y-3 p-4 text-left">
       <h3 className="text-sm font-medium">镜头 {no2(shot.no)} 待更新</h3>
       <div className="space-y-1 text-xs text-amber-300">{shot.outdated.map(r => <p key={`${r.kind}:${r.key ?? ''}`}>· {r.text}</p>)}</div>

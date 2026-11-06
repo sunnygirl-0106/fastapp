@@ -1,7 +1,8 @@
+import { normalizeTimeline, beatText } from '@/utils/timeline'
 import { cleanScript, mentions, fixTotal } from './validation'
 import type { Project, Segment, Shot } from '@/types'
 import { sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
-import { buildBeats, allocateSegmentDurations, splitSegmentText } from '@/utils/project'
+import { allocateSegmentDurations, splitSegmentText } from '@/utils/project'
 import { DUR_DEFAULT } from '@/data/duration'
 import { uid } from './generation'
 import { encodeAssets, encodeSegments, encodeShot, jsonl, formatTimeline, timelineLines } from './parse'
@@ -14,7 +15,7 @@ export function mockSegments(project: Project) {
   const p = { ...project, segments: [] as Segment[] }
   const samples = sampleSegments()
   const target = p.config.targetDur ?? 60
-  const n = p.config.durMode === 'manual' ? Math.max(Math.ceil(target / 30), Math.min(3, Math.floor(target / 4))) : 3
+  const n = p.config.durMode === 'manual' ? Math.max(Math.ceil(target / 15), Math.min(3, Math.floor(target / 4))) : 3
   const script = cleanScript(project.script)
   // Use contiguous slices of the actual script, so mock obeys the same coverage check.
   const sampleText = samples.map(s => s.text).join('')
@@ -22,7 +23,7 @@ export function mockSegments(project: Project) {
     ? samples.map(s => s.text) : splitSegmentText(script, n)
   p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: samples[i]?.title ?? `剧本段落${i + 1}`, text }))
   const durations = allocateSegmentDurations(p, p.segments)
-  const values = [...durations.values()]
+  const values = p.config.durMode === 'manual' ? p.segments.map(() => target / p.segments.length) : [...durations.values()]
   const fixed = fixTotal(values, p.config.durMode === 'manual' ? target : values.reduce((n, d) => n + Math.max(5, Math.round(d / 5) * 5), 0))
   p.segments.forEach((seg, i) => { seg.dur = fixed[i] })
   return { request, text: encodeSegments(p.segments, p.config.durMode ?? 'auto', p.config.targetDur ?? 60) }
@@ -53,8 +54,7 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
     assetIds: [...new Set([...(old?.assetIds ?? []).filter((id) => p.assets.some((a) => a.id === id)), ...refs.map((a) => a.id)])],
     id: old?.id ?? uid('shot'), segId: seg.id, no: seg.no, dur,
     shot: base?.shot ?? seg.text,
-    timeline: base && !/\d+\s*[–—-]\s*\d+\s*秒/.test(base.timeline) && timelineLines(base.timeline).length <= 6
-      ? formatTimeline(timelineLines(base.timeline)) : base ? buildBeats(base.timeline.split('\n')) : formatTimeline(['镜头建立人物与场景的位置关系。', '完成本段动作，保持前后衔接。']),
+    timeline: normalizeTimeline(formatTimeline((base ? timelineLines(base.timeline).map(beatText) : ['镜头建立人物与场景的位置关系。', '完成本段动作，保持前后衔接。']).reduce<string[]>((beats, beat, i) => { if (i < 4) beats.push(beat); else beats[3] += '；' + beat; return beats }, [])), dur),
     action: base?.action ?? seg.text,
     anchor: base?.anchor ?? scene?.name ?? '当前段落场景',
     motion: base?.motion ?? seg.text,
@@ -73,5 +73,6 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
   const missing = refs.filter(a => !mentions(shot.shot, names).found.includes(a.name))
   if (missing.length) shot.shot = missing.map(a => '@' + a.name).join('、') + '。' + shot.shot
   if (timelineLines(shot.timeline).length < 2) shot.timeline = formatTimeline([timelineLines(shot.timeline)[0] || '镜头呈现当前场景。', '动作完成，保持画面连贯。'])
+  shot.timeline = normalizeTimeline(shot.timeline, dur)
   return shot
 }

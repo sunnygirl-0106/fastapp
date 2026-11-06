@@ -12,7 +12,7 @@ const upstream = async url => {
   requests++
   return Response.json({ choices: [{ message: { content: 'test' } }], ...(cost === null ? {} : { usage: { cost, prompt_tokens: 10, completion_tokens: 20, completion_tokens_details: { reasoning_tokens: 5 } } }) }, { status })
 }
-const configure = stop => openRouterPlugin({ OPENROUTER_API_KEY: 'offline-test', BUDGET_USD: '5', STOP_AT_USD: String(stop) }, root, true, upstream).configureServer({ middlewares: { use(fn) { middleware = fn } } })
+const configure = (stop, extra = {}) => openRouterPlugin({ OPENROUTER_API_KEY: 'offline-test', BUDGET_USD: '5', STOP_AT_USD: String(stop), ...extra }, root, true, upstream).configureServer({ middlewares: { use(fn) { middleware = fn } } })
 configure(0)
 const server = createServer((req,res) => middleware(req,res,()=>{res.statusCode=404;res.end()}))
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
@@ -41,7 +41,17 @@ try {
   check('未知费用且远端不可用时停止调用',()=>{assert.equal(r.status,503);assert.equal(requests,before)})
   const ledger=await readFile(join(root,'.usage/usage.jsonl'),'utf8')
   check('账单不包含认证信息',()=>assert.ok(!ledger.includes('offline-test')))
+  remoteFailed=false
+  configure(4.23,{BUDGET_USD:'4.23',WARN_AT_USD:'4',USAGE_BASELINE_USD:'1'})
+  remote=4.99;usage=await (await fetch(base+'/api/usage')).json()
+  check('新预算扣除密钥历史用量，未到 $4 不提醒',()=>{assert.equal(usage.spent,3.99);assert.equal(usage.warning,null);assert.equal(usage.budget,4.23)})
+  remote=5;usage=await (await fetch(base+'/api/usage')).json()
+  check('恰好用到 $4 显示提醒，尚可继续调用',()=>{assert.equal(usage.spent,4);assert.match(usage.warning,/达到 \$4 提醒额度/);assert.ok(usage.untilStop>0)})
+  cost=0.1;status=200;r=await post()
+  check('$4 提醒不会提前停止调用',()=>assert.equal(r.status,200))
+  remote=5.23;const atLimit=requests;r=await post()
+  check('$4.23 拒绝新调用且不会请求上游',()=>{assert.equal(r.status,402);assert.equal(requests,atLimit)})
   await appendFile(join(root,'.usage/usage.jsonl'),'broken\n');r=await post()
-  check('账单损坏时拒绝调用',()=>{assert.equal(r.status,503);assert.equal(requests,before)})
+  check('账单损坏时拒绝调用',()=>{assert.equal(r.status,503);assert.equal(requests,atLimit)})
   console.log(`${checks} budget checks passed.`)
 } finally { await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true}) }

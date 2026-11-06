@@ -1,18 +1,33 @@
+import { normalizeTimeline, readBeat, saveTimeline } from '@/utils/timeline'
 import { create } from 'zustand'
 import { SHOT_FIELDS, type Asset, type Project, type Shot, type Segment, type OutdatedReason } from '@/types'
-import { COST, delay, mockImage, uid, videoCost } from '@/services/generation'
+import { COST, MODELS, MODEL_OPTIONS, delay, mockImage, uid, videoCost } from '@/services/generation'
 import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
 
-import { buildBeats, no2, shotsReferencingAsset, shotGenerationBlocked, allocateSegmentDurations } from '@/utils/project'
-import { clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration'
+import { no2, shotsReferencingAsset, shotGenerationBlocked, allocateSegmentDurations } from '@/utils/project'
+import { supportsDuration, clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration'
 import { buildAssetImagePrompt } from '@/data/assetTemplates'
-import { parseSegments, parseAssets, parseShots, formatTimeline, timelineLines } from '@/services/parse'
+import { parseSegments, parseAssets, parseShots, timelineLines } from '@/services/parse'
 import { mockSegments, mockAssets, mockShots } from '@/services/mockText'
 import { getPromptBook, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from '@/services/prompts'
 import { validatedText, TextModelError } from '@/services/textModel'
 import { cleanScript, splitPreface, deriveAssetIds } from '@/services/validation'
 import { renameText, mentionParts } from '@/utils/mentions'
 import { buildVideoPrompt, videoReferenceImages } from '@/services/videoPrompt'
+
+function resolveVideoModel(project: Project, ids: string[], model = project.lastVideoModel ?? MODELS.video) {
+  return MODEL_OPTIONS.video.some(option => option === model) && project.shots.filter(s => ids.includes(s.id)).every(s => supportsDuration(model, s.dur)) ? model : MODELS.video
+}
+
+const timelineReflows = new Map<string, number>()
+export const timelineReflowRevision = (projectId: string, shotId: string) => timelineReflows.get(`${projectId}:${shotId}`) ?? 0
+function reflowShot(shot: Shot, dur: number, projectId: string) {
+  if (shot.dur === dur) return
+  shot.timeline = normalizeTimeline(shot.timeline, dur, shot.dur)
+  shot.dur = dur
+  const key = `${projectId}:${shot.id}`
+  timelineReflows.set(key, (timelineReflows.get(key) ?? 0) + 1)
+}
 
 const LS_KEY = 'phanthy.projects.v2'
 
@@ -28,8 +43,10 @@ function queueReason(projectId: string, key: string, reason: OutdatedReason) {
   const pending = pendingReasons.get(projectId)!
   pending.set(key, mergeReason(pending.get(key) ?? [], reason))
 }
-function clearPending(projectId: string, key: string) {
-  pendingReasons.get(projectId)?.delete(key)
+function clearPending(projectId: string, key: string, scope: 'all' | 'design' = 'all') {
+  const remaining = scope === 'design' ? pendingReasons.get(projectId)?.get(key)?.filter(r => r.kind === 'video') : undefined
+  if (remaining?.length) pendingReasons.get(projectId)!.set(key, remaining)
+  else pendingReasons.get(projectId)?.delete(key)
   if (!pendingReasons.get(projectId)?.size) pendingReasons.delete(projectId)
 }
 function mergeReason(reasons: OutdatedReason[], reason: OutdatedReason) {
@@ -83,8 +100,8 @@ interface State {
   // step2 拆解
   addSegment: (title: string, text: string, dur: number) => void
   updateSegment: (id: string, patch: Partial<Pick<Segment, 'title' | 'text' | 'dur'>>) => void
-  dismissOutdated: (id: string) => void
-  dismissAllOutdated: () => void
+  dismissOutdated: (id: string, scope?: 'all' | 'design') => void
+  dismissAllOutdated: (scope?: 'all' | 'design') => void
   renameAsset: (id: string, name: string, sync: boolean) => void
   updateSegmentTitle: (id: string, title: string) => void
   deleteSegment: (id: string) => void
@@ -102,15 +119,17 @@ interface State {
   deleteShot: (id: string) => void
   regenerateShot: (id: string) => Promise<void>
 
+  setCurrentVideoVersion: (shotId: string, tag: string) => void
+
   // step5 视频
-  generateVideos: (shotIds: string[]) => Promise<void>
+  generateVideos: (shotIds: string[], model?: string) => Promise<void>
 
   // 确认即推进：先置 generating、再切页、最后跑生成
   startSegments: (durMode?: 'auto' | 'manual', targetDur?: number, style?: string) => Promise<void> // Step1 → Step2
   restartSegments: (durMode: 'auto' | 'manual', targetDur?: number, style?: string) => Promise<void>
   startAssets: () => Promise<void> // Step2 → Step3
   startShots: (segNos: number[], durations?: Record<string, number>) => Promise<void> // Step3 → Step4
-  startVideos: (shotIds: string[]) => Promise<void> // Step4 → Step5
+  startVideos: (shotIds: string[], model?: string) => Promise<void> // Step4 → Step5
 }
 
 function backfillVersionTime(projects: Project[]): Project[] {
@@ -144,7 +163,6 @@ export function migrateProjects(projects: Project[]): Project[] {
       missing.forEach((seg) => { seg.dur = durations.get(seg.id)! })
     }
     p.shots.forEach((s) => {
-      s.timeline = /\d+\s*[–—-]\s*\d+\s*秒/.test(s.timeline) ? buildBeats(s.timeline.split('\n')) : formatTimeline(timelineLines(s.timeline))
       s.segId ??= p.segments[s.no - 1]?.id ?? ''
       if (!Array.isArray(s.assetIds)) {
         const seg = p.segments.find((seg) => seg.id === s.segId)
@@ -158,6 +176,7 @@ export function migrateProjects(projects: Project[]): Project[] {
         seg.dur ??= s.dur
         s.dur = seg.dur
       }
+      s.timeline = normalizeTimeline(s.timeline, s.dur)
       s.outdated = (s.outdated ?? []).map(r => ['segDur', 'shotEdit'].includes(r.kind) ? { ...r, kind: 'video' as const } : r)
       const legacy = s.video as typeof s.video & { stale?: boolean; staleReason?: string }
       if (legacy.stale) s.outdated = mergeReason(s.outdated, { kind: 'video', key: 'legacy', text: legacy.staleReason || '视频不是最新的' })
@@ -168,8 +187,8 @@ export function migrateProjects(projects: Project[]): Project[] {
   return backfillVersionTime(projects)
 }
 
-function retainShot(shot: Shot) {
-  shot.outdated = []
+function retainShot(shot: Shot, scope: 'all' | 'design') {
+  shot.outdated = scope === 'design' ? (shot.outdated ?? []).filter(r => r.kind === 'video') : []
 }
 
 function markDurationOutdated(shot: Shot, p: Project) {
@@ -325,7 +344,7 @@ export const useStore = create<State>((set, get) => {
                 }).join('')
                 Object.assign(next, { [key]: text })
               })
-              next.dur = seg.dur ?? next.dur
+              reflowShot(next, seg.dur ?? next.dur, p.id)
               next.video = old?.video ?? next.video
               next.assetIds = next.assetIds?.filter(id => p.assets.some(a => a.id === id))
               next.outdated = next.video.versions.length ? [{ kind: 'video', key: 'shotEdit', text: '镜头已重新生成' }] : []
@@ -360,12 +379,13 @@ export const useStore = create<State>((set, get) => {
     get().showToast(failed ? `${succeeded ? `已生成 ${succeeded} 个镜头；` : ''}${failed} 个段落生成失败：${failure}，失败段落本次未扣费` : `已生成 ${succeeded} 个镜头`)
   }
 
-  const finishVideos = async (shotIds: string[], projectId: string | null) => {
+  const finishVideos = async (shotIds: string[], projectId: string | null, model: string) => {
     const project = get().projects.find((p) => p.id === projectId)
     if (!project) return
     try {
       const inputs = new Map(project.shots.filter((s) => shotIds.includes(s.id)).map((s) => [s.id, {
-        dur: s.dur, videoPrompt: buildVideoPrompt(s, project, s.dur), referenceImages: videoReferenceImages(s, project),
+        dur: s.dur, model, cost: videoCost(s.dur), videoPrompt: buildVideoPrompt(s, project, s.dur), referenceImages: videoReferenceImages(s, project),
+        resolution: '720p', ratio: project.config.ratio, audio: true,
       }]))
       for (let i = 0; i < shotIds.length; i++) {
         await delay(1200)
@@ -489,26 +509,26 @@ export const useStore = create<State>((set, get) => {
         }
         seg.dur = dur
         if (durChanged && shot) {
-          shot.dur = dur!
+          reflowShot(shot, dur!, p.id)
           markDurationOutdated(shot, p)
         }
         if (textChanged) message = shot?.outdated?.length ? `已保存，镜头 ${no2(shot.no)} 需要更新` : '已保存'
       })
       if (message) get().showToast(message)
     },
-    dismissOutdated: (id) => {
+    dismissOutdated: (id, scope = 'all') => {
       patchProject((p) => {
         const shot = p.shots.find((s) => s.id === id)
         if (!shot) return
-        retainShot(shot)
-        clearPending(p.id, shotKey(shot.segId)); clearPending(p.id, videoKey(shot.id))
+        retainShot(shot, scope)
+        clearPending(p.id, shotKey(shot.segId), scope); clearPending(p.id, videoKey(shot.id), scope)
       })
       get().showToast('已保留')
     },
-    dismissAllOutdated: () => {
+    dismissAllOutdated: (scope = 'all') => {
       let count = 0
       patchProject((p) => {
-        p.shots.filter((s) => s.outdated?.length).forEach((s) => { retainShot(s); clearPending(p.id, shotKey(s.segId)); clearPending(p.id, videoKey(s.id)); count++ })
+        p.shots.filter(s => s.outdated?.some(r => scope === 'all' || r.kind !== 'video')).forEach(s => { retainShot(s, scope); clearPending(p.id, shotKey(s.segId), scope); clearPending(p.id, videoKey(s.id), scope); count++ })
       })
       get().showToast(`已保留 ${count} 个镜头`)
     },
@@ -640,7 +660,22 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const s = p.shots.find((x) => x.id === id)
         if (!s) return
-        if (patch.timeline !== undefined) patch = { ...patch, timeline: formatTimeline(timelineLines(patch.timeline)) }
+        // A complete timed edit can change only the last endpoint and duration.
+        // Untimed pasted/legacy content is allocated at the existing duration.
+        let dur = patch.dur === undefined ? s.dur : clampDuration(patch.dur)
+        if (patch.timeline !== undefined) {
+          const lines = timelineLines(patch.timeline), last = readBeat(lines[lines.length - 1] ?? '')
+          if (last && lines.every(readBeat)) dur = clampDuration(last.end)
+          patch = { ...patch, timeline: saveTimeline(patch.timeline, dur) }
+        } else if (dur !== s.dur) reflowShot(s, dur, p.id)
+        const seg = p.segments.find(seg => seg.id === s.segId)
+        const durChanged = dur !== (seg?.dur ?? s.dur)
+        if (durChanged) {
+          if (seg) seg.dur = dur
+          s.dur = dur
+          markDurationOutdated(s, p)
+        }
+        patch = { ...patch, dur }
         const textEdit = SHOT_FIELDS.some(({ key }) => key in patch)
         if (textEdit) {
           const next = { ...s, ...patch }
@@ -653,7 +688,7 @@ export const useStore = create<State>((set, get) => {
         if (!changed) return
         Object.assign(s, patch)
         // 镜头内容变了，已有视频失效
-        if (textEdit) markVideoOutdated(p, [id], '镜头描述已修改')
+        if (textEdit && !durChanged) markVideoOutdated(p, [id], '镜头描述已修改')
       })
     },
 
@@ -673,17 +708,27 @@ export const useStore = create<State>((set, get) => {
       await get().generateShots([seg.no])
     },
 
-    generateVideos: async (shotIds) => {
+    setCurrentVideoVersion: (shotId, tag) => {
+      patchProject(p => {
+        const shot = p.shots.find(s => s.id === shotId)
+        if (!shot || !shot.video.versions.some(v => v.tag === tag)) return
+        shot.video.versions.forEach(v => { v.preferred = v.tag === tag })
+      })
+    },
+
+    generateVideos: async (shotIds, model) => {
       const projectId = get().currentId
       const project = get().projects.find((p) => p.id === projectId)
       if (!project) return
       shotIds = shotIds.filter((id) => project.shots.some((s) => s.id === id && s.video.state !== 'generating'))
       if (!shotIds.length) return
+      const selectedModel = resolveVideoModel(project, shotIds, model)
       patchProject((p) => {
+        p.lastVideoModel = selectedModel
         p.shots.forEach((s) => { if (shotIds.includes(s.id)) { clearPending(p.id, videoKey(s.id)); s.video.state = 'generating' } })
       })
       get().showToast('正在生成视频…')
-      await finishVideos(shotIds, projectId)
+      await finishVideos(shotIds, projectId, selectedModel)
     },
 
     restartSegments: async (durMode, targetDur, style) => {
@@ -727,24 +772,30 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         p.shotStatus = 'generating'
         p.segments.forEach((seg) => {
-          if (confirmedDurations?.[seg.id] !== undefined) seg.dur = confirmedDurations[seg.id]
+          if (confirmedDurations?.[seg.id] !== undefined) {
+            seg.dur = confirmedDurations[seg.id]
+            const shot = p.shots.find(s => s.segId === seg.id)
+            if (shot && shot.dur !== seg.dur) { reflowShot(shot, seg.dur, p.id); markDurationOutdated(shot, p) }
+          }
         })
       })
       set({ step: 4 })
       await finishShots(segIds, p.id)
     },
 
-    startVideos: async (shotIds) => {
+    startVideos: async (shotIds, model) => {
       const projectId = get().currentId
       const project = get().projects.find((p) => p.id === projectId)
       if (!project) return
       shotIds = shotIds.filter((id) => project.shots.some((s) => s.id === id && s.video.state !== 'generating'))
       if (!shotIds.length) return
+      const selectedModel = resolveVideoModel(project, shotIds, model)
       patchProject((p) => {
+        p.lastVideoModel = selectedModel
         p.shots.forEach((s) => { if (shotIds.includes(s.id)) { clearPending(p.id, videoKey(s.id)); s.video.state = 'generating' } })
       })
       set({ step: 5 })
-      await finishVideos(shotIds, projectId)
+      await finishVideos(shotIds, projectId, selectedModel)
     },
   }
 })

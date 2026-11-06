@@ -13,8 +13,8 @@ function RightCluster({ balance }: { balance: number }) {
         <Diamond />
         <span className="tabular-nums">{fmt(balance)}</span>
       </span>
-      <Bell size={16} className="text-muted" />
-      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-brand/70 to-indigo-500/70 text-[11px] font-bold text-black">
+      <Bell size="1rem" className="text-muted" />
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-brand/70 to-indigo-500/70 text-[0.6875rem] font-bold text-black">
         8
       </span>
     </div>
@@ -27,16 +27,16 @@ export function ProjectsTopBar({ balance }: { balance: number }) {
     <header className="flex h-12 items-center justify-between border-b border-white/10 bg-canvas px-4 backdrop-blur-[10px]">
       <div className="flex items-center gap-2">
         <img src={logoMark} alt="" className="h-5 w-5" />
-        <img src={logoWordmark} alt="PhanthyMovie" className="h-[14px] w-auto" />
+        <img src={logoWordmark} alt="PhanthyMovie" className="h-[0.875rem] w-auto" />
       </div>
       <div className="flex items-center gap-4">
         <span className="inline-flex items-center gap-2">
           <img src={coinIcon} alt="" className="h-3.5 w-3.5" />
-          <span className="tabular-nums text-[14px] text-accent-coin">{fmt(balance)}</span>
+          <span className="tabular-nums text-[0.875rem] text-accent-coin">{fmt(balance)}</span>
         </span>
-        <span className="text-[14px] text-[#a3a3a3]">创作手册</span>
-        <Bell size={20} className="text-white opacity-40" />
-        <Settings size={20} className="text-white/80" />
+        <span className="text-[0.875rem] text-[#a3a3a3]">创作手册</span>
+        <Bell size="1.25rem" className="text-white opacity-40" />
+        <Settings size="1.25rem" className="text-white/80" />
         <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
       </div>
     </header>
@@ -48,7 +48,7 @@ export function WorkflowTopBar({ name, balance, onBack }: { name: string; balanc
     <header className="flex items-center justify-between px-6 py-4">
       <div className="flex items-center gap-2 text-sm">
         <button className="inline-flex items-center gap-1 text-white/80 hover:text-white" onClick={onBack}>
-          <ChevronLeft size={16} /> 返回
+          <ChevronLeft size="1rem" /> 返回
         </button>
         <span className="text-brand">{name}</span>
       </div>

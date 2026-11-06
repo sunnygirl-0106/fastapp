@@ -9,8 +9,8 @@ import { createServer } from 'vite'
 const result=spawnSync('python3',['-c',String.raw`
 import sys,json
 sys.path.insert(0,'../测试提示词效果')
-from prompts import PromptBook,time_axis,pace_hint,replace_mentions
-from validation import fix_total,clean_script,timing_instructions,derive_asset_ids,style_notes,visible_length
+from prompts import PromptBook,pace_hint,replace_mentions
+from validation import clean_script,derive_asset_ids,style_notes,visible_length,validate_shots,BEAT_RANGES,MAX_BEATS
 book=PromptBook()
 beats=['抬头。','小雨说：“明天我们一起去看海好吗？”','点头。']
 segments=[dict(ordinal=1,title='走进房间',duration_seconds=15,text='小雨走进房间。')]
@@ -19,7 +19,12 @@ shot=dict(type='shot',segment_ordinal=1,shot='@小雨在@房间',timeline=beats,
 samples=[shot,dict(shot='@房间的影像画像雕像肖像录像头像好像，仿佛@小雨心想：“紧张然后”',timeline=['@小雨妈妈缓缓转身','@小雨像风'],action='迅速',motion='无位移。',blocking='@小雨妈妈然后走入@房间',background='@陌生人'),dict(shot='𠮷😀 “台词不计数”',timeline=['「台词」','『对白』'],motion='无位移。。。')]
 id_by_name={'小雨':'a','房间':'b','小雨妈妈':'c'}
 parity=[dict(row=row,ids=derive_asset_ids(row,id_by_name),notes=style_notes(row,'镜头（段 1）')) for row in samples]
-print(json.dumps(dict(parity=parity,idByName=id_by_name,systems=book.systems,users=book.users,templates=book.templates,segments=segments,assets=assets,shot=shot,segmentUser=book.segment_user('正文','manual',15),assetUser=book.asset_user(segments,'人物设定','3D 卡通'),shotUser=book.shot_user(segments,assets,'3D 卡通',existing=[shot],targets=[1]),stitched=book.stitch(segments,assets,[shot],'3D 卡通','9:16 竖屏'),axes=[time_axis(beats,n) for n in [4,15,30]],hints=[pace_hint(n,beats) for n in [4,15,30]],fixed=[fix_total([8,13,21],n) for n in range(12,91)],clean=clean_script('# **人物**\n\\【正文\\】')) ,ensure_ascii=False))
+beat_checks=[]
+for n in [1,2,3,4,5]:
+    row=dict(shot,timeline=['抬头。']*n)
+    errors,notes=validate_shots([row],segments,assets,[1])
+    beat_checks.append(dict(count=n,errors=errors))
+print(json.dumps(dict(beatChecks=beat_checks,beatRanges=BEAT_RANGES,maxBeats=MAX_BEATS,parity=parity,idByName=id_by_name,systems=book.systems,users=book.users,templates=book.templates,segments=segments,assets=assets,shot=shot,segmentUser=book.segment_user('正文','manual',15),assetUser=book.asset_user(segments,'人物设定','3D 卡通'),shotUser=book.shot_user(segments,assets,'3D 卡通',existing=[shot],targets=[1]),stitched=book.stitch(segments,assets,[shot],'3D 卡通','9:16 竖屏'),hints=[pace_hint(n,beats) for n in [4,15,30]],clean=clean_script('# **人物**\n\\【正文\\】')) ,ensure_ascii=False))
 `],{encoding:'utf8'})
 assert.equal(result.status,0,result.stderr)
 const expected=JSON.parse(result.stdout)
@@ -30,6 +35,15 @@ try {
  const prompts=await server.ssrLoadModule('/src/services/prompts.ts'),video=await server.ssrLoadModule('/src/services/videoPrompt.ts'),validation=await server.ssrLoadModule('/src/services/validation.ts'),parse=await server.ssrLoadModule('/src/services/parse.ts')
  const project={config:{durMode:'manual',targetDur:15,shotStyle:'3D 卡通',ratio:'9:16 竖屏'},script:'正文',segments:expected.segments.map(s=>({id:'s'+s.ordinal,no:s.ordinal,title:s.title,text:s.text,dur:s.duration_seconds})),assets:expected.assets.map(a=>({id:a.asset_id,kind:a.kind==='character'?'char':'scene',name:a.name,alias:a.alias,prompt:a.prompt,imageUrl:'image-'+a.asset_id})),shots:[]}
  const shot={...expected.shot,id:'shot1',segId:'s1',no:1,dur:15,timeline:parse.formatTimeline(expected.shot.timeline),assetIds:['a','b']}
+ check('模型拍数与 Python 一致：3 拍通过、5 拍报错，含 1/2/4 边界',()=>{
+   assert.deepEqual(validation.BEAT_RANGES,expected.beatRanges);assert.equal(validation.MAX_BEATS,expected.maxBeats)
+   const warn=console.warn;console.warn=()=>{}
+   try { for(const sample of expected.beatChecks) {
+     let errors=[]
+     try {validation.validateShots([{...structuredClone(expected.shot),timeline:Array(sample.count).fill('抬头。')}],expected.segments,expected.assets,[1])} catch(error) {errors=error.errors}
+     assert.deepEqual(errors,sample.errors)
+   }} finally {console.warn=warn}
+ })
  check('所有字段 derive_asset_ids 顺序、去重、最长名称与 Python 一致',()=>{
    for(const sample of expected.parity) assert.deepEqual(validation.deriveAssetIds(sample.row,new Map(Object.entries(expected.idByName))),sample.ids)
  })
@@ -44,8 +58,8 @@ try {
  // JSON whitespace is semantically irrelevant; the Python JSON encoder adds spaces.
  const normalize=s=>s.split('\n').map(line=>{const i=line.indexOf('{');return i>=0?line.slice(0,i)+JSON.stringify(JSON.parse(line.slice(i))):line}).join('\n')
  assert.equal(normalize(prompts.buildShotUserMessage(project,[1],[shot])),normalize(expected.shotUser))})
- check('模板 A/B/C 成品逐字相等',()=>{assert.deepEqual(project.assets.map(a=>video.buildReferenceImagePrompt(a,project)),expected.stitched.references.map(r=>r.prompt));assert.equal(video.buildVideoPrompt(shot,project,15),expected.stitched.videos[0].prompt)})
- check('时间轴/节奏/时长修正/Markdown 清理',()=>{assert.deepEqual([4,15,30].map(n=>video.timeAxis(expected.shot.timeline,n)),expected.axes);assert.deepEqual([4,15,30].map(n=>video.paceHint(n,expected.shot.timeline)),expected.hints);assert.deepEqual(Array.from({length:79},(_,i)=>validation.fixTotal([8,13,21],i+12)),expected.fixed);assert.equal(validation.cleanScript('# **人物**\n\\【正文\\】'),expected.clean)})
+ check('模板 A/B 成品逐字相等',()=>{assert.deepEqual(project.assets.map(a=>video.buildReferenceImagePrompt(a,project)),expected.stitched.references.map(r=>r.prompt))})
+ check('节奏/Markdown 清理',()=>{assert.deepEqual([4,15,30].map(n=>video.paceHint(n,expected.shot.timeline)),expected.hints);assert.equal(validation.cleanScript('# **人物**\n\\【正文\\】'),expected.clean)})
  check('v8 原始输出中文引号恢复',()=>{
    const script=readFileSync('../测试提示词效果/examples/示例剧本.txt','utf8')
    const rows=parse.parseSegments(v8QuoteOutput,'manual',30,script)

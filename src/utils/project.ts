@@ -4,9 +4,21 @@ import { SHOT_FIELDS, type Asset, type Project, type Segment, type Shot, type Sh
 
 /* ---------- 镜头视频版本 ----------
    一个镜头可以有多个版本（v1/v2/…），旧版本永远保留。
-   取当前偏好版本；没有标记时回退到最新生成的那个。 */
-export function preferredVersion(v: ShotVideo): VideoVersion | undefined {
+   取当前版本；没有标记时回退到最新生成的那个。 */
+export function currentVersion(v: ShotVideo): VideoVersion | undefined {
   return v.versions.find((x) => x.preferred) ?? v.versions[v.versions.length - 1]
+}
+
+// 兼容只读 proposal 样本的旧导出。产品代码使用 currentVersion。
+export const preferredVersion = currentVersion
+
+export function videoDownloads(shots: Shot[], all = false) {
+  return [...shots].sort((a, b) => a.no - b.no).flatMap(shot =>
+    (all ? [...shot.video.versions].sort((a, b) => Number(a.tag.slice(1)) - Number(b.tag.slice(1))) : [currentVersion(shot.video)].filter((v): v is VideoVersion => !!v))
+      .map(version => ({ filename: `镜头${no2(shot.no)}_${version.tag}.mp4`, url: version.url })))
+}
+export function videoDownloadToast(files: ReturnType<typeof videoDownloads>) {
+  return `已开始下载 ${files.length} 段视频：${files.slice(0, 3).map(f => f.filename).join("、")}${files.length > 3 ? ` 等 ${files.length} 段` : ""}（示意）`
 }
 
 /* ---------- 时间格式：今天 / 昨天 / 具体日期 ---------- */
@@ -66,9 +78,9 @@ export function isDone(p: Project): boolean {
 export function projectCover(p: Project): string | undefined {
   // 1. 镜号最靠前的已完成视频封面
   const doneShots = p.shots
-    .filter((s) => s.video.state === 'done' && preferredVersion(s.video)?.url)
+    .filter((s) => s.video.state === 'done' && currentVersion(s.video)?.url)
     .sort((a, b) => a.no - b.no)
-  if (doneShots.length) return preferredVersion(doneShots[0].video)!.url
+  if (doneShots.length) return currentVersion(doneShots[0].video)!.url
 
   // 2. 第一张已生成的场景参考图
   const scene = p.assets.find((a) => a.kind === 'scene' && a.imgState === 'done' && a.imageUrl)
@@ -92,17 +104,6 @@ export function projectCover(p: Project): string | undefined {
 export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
 export const fmtDur = (d: number | string | undefined) => d === undefined ? '待分配' : `${parseInt(String(d), 10)} 秒`
 
-
-// 画面节奏只表达先后顺序，不随镜头时长变化。
-export function buildBeats(lines: string[]): string {
-  const clean = lines.map((line) => line.replace(/^(?:\s*(?:\d+\s*[–—-]\s*\d+\s*秒\s*[：:]|[①-⑩]))+\s*/, '').trim()).filter(Boolean)
-  if (!clean.length) return '① 保持当前画面与动作'
-  const count = Math.min(5, clean.length)
-  return Array.from({ length: count }, (_, i) => {
-    const text = clean.slice(Math.floor(i * clean.length / count), Math.floor((i + 1) * clean.length / count)).join('；')
-    return `${'①②③④⑤'[i]} ${text}`
-  }).join('\n')
-}
 
 // Bounded proportional allocation. Find the scale after clamping, then use
 // largest remainders so rounding preserves the exact integer total.
@@ -173,6 +174,10 @@ export function allocateSegmentDurations(p: Project, segs: Segment[]): Map<strin
   return result
 }
 
+// 镜头设计只受上游改动影响；视频仍展示全部原因。
+export const shotOutdatedReasons = (shot?: Shot) => (shot?.outdated ?? []).filter(r => r.kind === 'segText' || r.kind === 'asset')
+export const outdatedDesignShots = (p: Project) => p.shots.filter(s => shotOutdatedReasons(s).length)
+export const outdatedVideos = (p: Project) => p.shots.filter(s => s.video.versions.length && s.outdated?.length)
 export const outdatedShots = (p: Project) => p.shots.filter((s) => s.outdated?.length)
 export const ungeneratedSegments = (p: Project) => p.segments.filter((s) => !p.shots.some((shot) => shot.segId === s.id))
 export function shotsReferencingAsset(p: Project, a: Asset): Shot[] {

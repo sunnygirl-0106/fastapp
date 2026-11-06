@@ -47,5 +47,5 @@ export function useAutoSave(commit: (v: string) => void, delayMs = 700) {
     [],
   )
 
-  return { status, schedule, flush }
+  return { status, schedule, flush, hasPending: () => pending.current !== null }
 }

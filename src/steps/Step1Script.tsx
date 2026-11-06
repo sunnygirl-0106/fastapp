@@ -76,9 +76,9 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           <button
             disabled={locked}
             onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-1.5 text-[13px] text-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted"
+            className="inline-flex items-center gap-1.5 text-[0.8125rem] text-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted"
           >
-            <Upload size={14} className="text-faint" />
+            <Upload size="0.875rem" className="text-faint" />
             上传剧本
           </button>
         }
@@ -103,7 +103,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           setStatus('saved')
         }}
         placeholder="在这里粘贴或输入剧本内容…"
-        className={`min-h-[420px] w-full resize-y rounded-xl border border-line bg-panel px-5 py-4 text-sm leading-7 outline-none placeholder:text-faint ${
+        className={`min-h-[26.25rem] w-full resize-y rounded-xl border border-line bg-panel px-5 py-4 text-sm leading-7 outline-none placeholder:text-faint ${
           locked ? 'cursor-default text-white/70 focus:border-line' : 'focus:border-brand/50'
         }`}
       />
@@ -131,7 +131,7 @@ export default function Step1Script({ project, locked }: { project: Project; loc
           <PillCTA disabled={chars === 0} onClick={() => setConfirm(true)}>
             {chars > 0 ? (
               <>
-                <span className="text-[12px] leading-none">✦</span>
+                <span className="text-[0.75rem] leading-none">✦</span>
                 {COST.segGen} 拆解剧本
               </>
             ) : (

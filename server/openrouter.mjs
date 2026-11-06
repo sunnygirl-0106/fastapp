@@ -7,7 +7,8 @@ export function openRouterPlugin(env, root, enabled, fetcher = fetch) {
   const key = env.OPENROUTER_API_KEY
   const model = env.OPENROUTER_MODEL || 'google/gemini-3.1-pro-preview'
   const budget = Number(env.BUDGET_USD ?? 5), stopAt = Math.min(Number(env.STOP_AT_USD ?? 4.5), budget)
-  if (!Number.isFinite(budget) || budget < 0 || !Number.isFinite(stopAt) || stopAt < 0) throw new Error('预算配置必须为非负数字')
+  const warnAt = Math.min(Number(env.WARN_AT_USD ?? 4), budget), baseline = Number(env.USAGE_BASELINE_USD ?? 0)
+  if ([budget, stopAt, warnAt, baseline].some(value => !Number.isFinite(value) || value < 0)) throw new Error('预算配置必须为非负数字')
   const directory = resolve(root, '.usage'), file = resolve(directory, 'usage.jsonl')
   let queue = Promise.resolve()
   const redact = value => key ? value.split(key).join('[已隐藏]') : value
@@ -24,14 +25,18 @@ export function openRouterPlugin(env, root, enabled, fetcher = fetch) {
     if (key) {
       try {
         const response = await fetcher('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10000) })
-        if (response.ok) remote = number((await response.json()).data?.usage)
+        if (response.ok) {
+          const lifetime = number((await response.json()).data?.usage)
+          if (lifetime !== null) remote = Math.max(0, lifetime - baseline)
+        }
       } catch { /* Fall back to the ledger without logging credentials or upstream errors. */ }
     }
     const unknown = rows.filter(row => row.cost === null).length
     // Persisted floor also protects against delayed upstream usage reporting.
     const floor = rows.reduce((max, row) => Math.max(max, number(row.spentAfter) ?? 0), 0)
     const spent = Math.max(remote ?? 0, local, floor)
-    return { remote, local, unknown, spent, budget, stopAt, remaining: Math.max(0, budget - spent), untilStop: Math.max(0, stopAt - spent), rows: rows.slice().reverse() }
+    const warning = spent >= warnAt ? `费用提醒：本轮已使用 $${spent.toFixed(4)}，达到 $${warnAt} 提醒额度；预算剩余 $${Math.max(0, budget - spent).toFixed(4)}。` : null
+    return { remote, local, unknown, spent, budget, stopAt, warnAt, warning, remaining: Math.max(0, budget - spent), untilStop: Math.max(0, stopAt - spent), rows: rows.slice().reverse() }
   }
   async function chat(req, res, body) {
     const totals = await usage()
@@ -92,4 +97,4 @@ export function openRouterPlugin(env, root, enabled, fetcher = fetch) {
     },
   }
 }
-const usageHtml = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文本模型费用</title><style>body{font:15px system-ui;background:#111418;color:#e8edf2;margin:32px}h1{font-size:24px}.stats{display:flex;gap:20px;flex-wrap:wrap}.stats>div{background:#20252c;padding:24px;border-radius:12px;min-width:210px}strong{display:block;font-size:26px;margin:12px 0}small{color:#b2bcc6}table{border-collapse:collapse;width:100%;margin-top:28px}td,th{text-align:left;padding:12px;border-bottom:1px solid #343b44}.bad{color:#ff8b8b}</style><h1>文本模型费用</h1><p>每 5 秒自动刷新 · 费用未知不会按零处理</p><div class="stats"><div>累计已花<strong id="spent">—</strong><small id="sources"></small></div><div>预算剩余<strong id="remaining">—</strong><small id="budget"></small></div><div>离自动停止<strong id="untilStop">—</strong><small id="stop"></small></div></div><p id="error" class="bad"></p><table><thead><tr><th>时间</th><th>步骤 / 模型</th><th>输入 / 输出 / 思考 token</th><th>费用（美元）</th><th>成功</th><th>耗时</th></tr></thead><tbody id="rows"></tbody></table><script>const el=id=>document.getElementById(id),money=n=>n===null?'未知':'$'+n.toFixed(6);async function refresh(){try{const r=await fetch('/api/usage');if(!r.ok)throw Error('费用服务不可用');const d=await r.json();el('spent').textContent=money(d.spent);el('sources').textContent='OpenRouter：'+money(d.remote)+'；本地：'+money(d.local)+'（未知 '+d.unknown+' 次）';el('remaining').textContent=money(d.remaining);el('budget').textContent='总预算 '+money(d.budget);el('untilStop').textContent=money(d.untilStop);el('stop').textContent='停止阈值 '+money(d.stopAt);el('error').textContent='';el('rows').replaceChildren(...d.rows.map(row=>{const tr=document.createElement('tr');[new Date(row.time).toLocaleString(),row.step+' / '+row.model,[row.inputTokens,row.outputTokens,row.reasoningTokens].map(n=>n??'未知').join(' / '),money(row.cost),row.success?'是':'否',(row.durationMs/1000).toFixed(1)+' 秒'].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.append(td)});return tr}))}catch(e){el('error').textContent=e.message}finally{setTimeout(refresh,5000)}}refresh()</script></html>`
+const usageHtml = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文本模型费用</title><style>body{font:15px system-ui;background:#111418;color:#e8edf2;margin:32px}h1{font-size:24px}.stats{display:flex;gap:20px;flex-wrap:wrap}.stats>div{background:#20252c;padding:24px;border-radius:12px;min-width:210px}strong{display:block;font-size:26px;margin:12px 0}small{color:#b2bcc6}table{border-collapse:collapse;width:100%;margin-top:28px}td,th{text-align:left;padding:12px;border-bottom:1px solid #343b44}.bad{color:#ff8b8b}</style><h1>文本模型费用</h1><p>每 5 秒自动刷新 · 费用未知不会按零处理</p><div class="stats"><div>累计已花<strong id="spent">—</strong><small id="sources"></small></div><div>预算剩余<strong id="remaining">—</strong><small id="budget"></small></div><div>离自动停止<strong id="untilStop">—</strong><small id="stop"></small></div></div><p id="warning" class="bad" role="alert"></p><p id="error" class="bad"></p><table><thead><tr><th>时间</th><th>步骤 / 模型</th><th>输入 / 输出 / 思考 token</th><th>费用（美元）</th><th>成功</th><th>耗时</th></tr></thead><tbody id="rows"></tbody></table><script>const el=id=>document.getElementById(id),money=n=>n===null?'未知':'$'+n.toFixed(6);async function refresh(){try{const r=await fetch('/api/usage');if(!r.ok)throw Error('费用服务不可用');const d=await r.json();el('spent').textContent=money(d.spent);el('sources').textContent='OpenRouter：'+money(d.remote)+'；本地：'+money(d.local)+'（未知 '+d.unknown+' 次）';el('remaining').textContent=money(d.remaining);el('budget').textContent='总预算 '+money(d.budget);el('untilStop').textContent=money(d.untilStop);el('stop').textContent='停止阈值 '+money(d.stopAt);el('error').textContent='';el('warning').textContent=d.warning||'';el('rows').replaceChildren(...d.rows.map(row=>{const tr=document.createElement('tr');[new Date(row.time).toLocaleString(),row.step+' / '+row.model,[row.inputTokens,row.outputTokens,row.reasoningTokens].map(n=>n??'未知').join(' / '),money(row.cost),row.success?'是':'否',(row.durationMs/1000).toFixed(1)+' 秒'].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.append(td)});return tr}))}catch(e){el('error').textContent=e.message}finally{setTimeout(refresh,5000)}}refresh()</script></html>`

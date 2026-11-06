@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronLeft, MoreVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useStore } from '@/store/workflowStore'
 import { ProjectsTopBar } from '@/components/TopBar'
-import { Button, Input, Label, Modal, Overlay } from '@/components/ui'
+import { Button, Input, Label, Modal, Overlay, Popover, MenuItem } from '@/components/ui'
 import { DEFAULT_BALANCE } from '@/data/mock'
 import { formatCreatedAt, isDone, isRunning, projectCover, projectStatus } from '@/utils/project'
 import emptyCover from '@/assets/cover-empty.png'
@@ -54,27 +54,27 @@ export default function ProjectList() {
       <ProjectsTopBar balance={balance} />
       <div className="flex flex-1">
         {/* 侧边栏 */}
-        <aside className="w-[280px] shrink-0 border-r border-white/5 bg-white/5 py-6">
+        <aside className="w-[17.5rem] shrink-0 border-r border-white/5 bg-white/5 py-6">
           <div className="flex flex-col gap-5 px-6">
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-2.5 text-[22px] font-medium text-white">
-                <ChevronLeft size={22} className="text-[#9b9b9b]" /> 工作流
+              <div className="flex items-center gap-2.5 text-[1.375rem] font-medium text-white">
+                <ChevronLeft size="1.375rem" className="text-[#9b9b9b]" /> 工作流
               </div>
               {/* 画面比例 / 风格标签（对齐 Figma node 6:1601） */}
               <div className="flex items-center gap-1.5">
-                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[13px] leading-none text-accent-tag backdrop-blur-[6px]">
+                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[0.8125rem] leading-none text-accent-tag backdrop-blur-[6px]">
                   {cfg?.ratio ?? '9:16 竖屏'}
                 </span>
-                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[13px] leading-none text-accent-tag backdrop-blur-[6px]">
+                <span className="rounded-md bg-brand/20 px-2.5 py-1.5 text-[0.8125rem] leading-none text-accent-tag backdrop-blur-[6px]">
                   {cfg?.style ?? '写实'}
                 </span>
               </div>
             </div>
             <div className="rounded-xl bg-white/5 p-4 backdrop-blur-[6px]">
-              <div className="text-[13px] text-white/40">当前模式</div>
+              <div className="text-[0.8125rem] text-white/40">当前模式</div>
               <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[15px] font-medium text-white">{cfg?.mode ?? '全自动 AI 生成'}</span>
-                <button className="shrink-0 text-[13px] text-accent-tag">切换模式</button>
+                <span className="text-[0.9375rem] font-medium text-white">{cfg?.mode ?? '全自动 AI 生成'}</span>
+                <button className="shrink-0 text-[0.8125rem] text-accent-tag">切换模式</button>
               </div>
             </div>
           </div>
@@ -93,7 +93,7 @@ export default function ProjectList() {
               style={CTA_GRADIENT}
               className="flex h-10 items-center gap-2 rounded-full px-5 text-sm font-medium text-black transition-transform hover:brightness-105 active:scale-[0.98]"
             >
-              <Plus size={14} strokeWidth={2.5} /> 新建项目
+              <Plus size="0.875rem" strokeWidth={2.5} /> 新建项目
             </button>
           </div>
 
@@ -107,7 +107,7 @@ export default function ProjectList() {
                 <div
                   key={p.id}
                   onClick={() => openProject(p.id)}
-                  className="group relative flex h-[300px] cursor-pointer flex-col overflow-hidden rounded-lg border border-white/5 bg-card transition-colors hover:border-white/15"
+                  className="group relative flex h-[18.75rem] cursor-pointer flex-col overflow-hidden rounded-lg border border-white/5 bg-card transition-colors hover:border-white/15"
                 >
                   {/* 封面 */}
                   <div
@@ -139,31 +139,19 @@ export default function ProjectList() {
                           }
                         }}
                       >
-                        <MoreVertical size={15} />
+                        <MoreVertical size="0.9375rem" />
                       </button>
 
                       {menuId === p.id && menuPos && (
-                        <div
-                          className="fixed z-30 w-36 overflow-hidden rounded-lg border border-white/10 bg-[#1c1e20] py-1 shadow-xl shadow-black/40"
-                          style={{ left: menuPos.x, top: menuPos.y }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-white/90 transition hover:bg-white/5"
-                            onClick={() => startRename(p.id, p.name)}
-                          >
-                            <Pencil size={14} className="text-white/50" /> 重命名
-                          </button>
-                          <button
-                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-red-400 transition hover:bg-red-500/10"
-                            onClick={() => {
-                              setMenuId(null)
-                              setConfirmDel(p.id)
-                            }}
-                          >
-                            <Trash2 size={14} /> 删除
-                          </button>
-                        </div>
+                        <Popover anchor={{ left: menuPos.x, top: menuPos.y }} width={208} variant="menu" onClose={() => { setMenuId(null); setMenuPos(null) }}>
+                          <MenuItem icon={<Pencil size="1rem" />} onClick={() => startRename(p.id, p.name)}>
+                            重命名
+                          </MenuItem>
+                          <div className="my-1.5 border-t border-white/[0.08]" />
+                          <MenuItem danger icon={<Trash2 size="1rem" />} onClick={() => { setMenuId(null); setConfirmDel(p.id) }}>
+                            删除
+                          </MenuItem>
+                        </Popover>
                       )}
                     </div>
                   </div>
@@ -229,7 +217,7 @@ export default function ProjectList() {
 
       {createOpen && (
         <Overlay onClose={() => setCreateOpen(false)}>
-          <div className="w-[460px] overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+          <div className="w-[28.75rem] overflow-hidden dialog-surface rounded-2xl border">
             {/* 头部 */}
             <div className="flex h-16 items-center justify-between border-b border-white/5 px-5">
               <div className="text-base font-medium text-white">新建视频项目</div>
@@ -238,14 +226,14 @@ export default function ProjectList() {
                 onClick={() => setCreateOpen(false)}
                 aria-label="关闭"
               >
-                <X size={14} />
+                <X size="0.875rem" />
               </button>
             </div>
 
             {/* 主体 */}
             <div className="flex flex-col gap-3 px-5 py-6">
               <div className="flex items-center gap-2 text-sm font-medium text-white/90">
-                <Pencil size={12} className="text-white/90" /> 项目名称
+                <Pencil size="0.75rem" className="text-white/90" /> 项目名称
               </div>
               <input
                 autoFocus

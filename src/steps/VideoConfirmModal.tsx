@@ -1,3 +1,4 @@
+import { Checkbox } from '@/components/ui'
 import type { Shot } from '@/types'
 import { VIDEO_DUR_SPEC, supportsDuration } from '@/data/duration'
 import { no2 } from '@/utils/project'
@@ -8,15 +9,17 @@ import { FakeSelect, GenerateConfirmModal, Label, ModelSelect } from '@/componen
 export default function VideoConfirmModal({
   shots,
   balance,
+  initialModel,
   onClose,
   onConfirm,
 }: {
   shots: Shot[]
   balance: number
+  initialModel?: string
   onClose: () => void
-  onConfirm: () => void
+  onConfirm: (model: string) => void
 }) {
-  const [model, setModel] = useState<string>(MODELS.video)
+  const [model, setModel] = useState<string>(MODEL_OPTIONS.video.some(option => option === initialModel) ? initialModel! : MODELS.video)
 
   const count = shots.length
   const disabledOptions: Record<string, string> = {}
@@ -44,10 +47,10 @@ export default function VideoConfirmModal({
       confirmText={`确认并生成 ${count} 段视频`}
       width={520}
       onClose={onClose}
-      onConfirm={onConfirm}
+      onConfirm={() => onConfirm(selectedModel)}
       extra={
         <>
-        <div className="grid grid-cols-3 gap-4 text-[13px]">
+        <div className="grid grid-cols-3 gap-4 text-[0.8125rem]">
           <div>
             <Label>分辨率</Label>
             <FakeSelect value="720p" />
@@ -59,7 +62,7 @@ export default function VideoConfirmModal({
           <div>
             <Label>配音</Label>
             <label className="flex items-center gap-2 pt-2">
-              <input type="checkbox" defaultChecked className="accent-brand" />
+              <Checkbox defaultChecked />
               <span>生成配音</span>
             </label>
           </div>

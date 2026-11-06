@@ -1,18 +1,22 @@
+import TimelineReflow from '@/components/TimelineReflow'
+import { normalizeTimeline } from '@/utils/timeline'
+import { useTimelineReflow } from '@/hooks/useTimelineReflow'
+import { timelineReflowRevision } from '@/store/workflowStore'
+import { Checkbox } from '@/components/ui'
 import ShotTextEditor from '@/components/ShotTextEditor'
-import { styleNotes } from '@/services/validation'
-import OutdatedBadge from '@/components/OutdatedBadge'
 import MentionText from '@/components/MentionText'
 import { timelineLines } from '@/services/parse'
 import DurationStepper from '@/components/DurationStepper'
 import NoticeBar from '@/components/NoticeBar'
-import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Columns2, Filter, MoreHorizontal, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, Columns2, Filter, LoaderCircle, MoreHorizontal, Pencil, RotateCcw, Video, Trash2, X } from 'lucide-react'
 import type { Project, Shot, ShotVideo } from '@/types'
 import { SHOT_FIELDS, SHOT_GROUPS } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, videoCost } from '@/services/generation'
-import { no2, fmtDur, outdatedShots, ungeneratedSegments, shotGenerationBlocked } from '@/utils/project'
+import { no2, fmtDur, outdatedDesignShots, shotOutdatedReasons, ungeneratedSegments, shotGenerationBlocked } from '@/utils/project'
 import { useAutoSave } from '@/hooks/useAutoSave'
+import { getUiScale } from '@/utils/layout'
 import {
   ActionBar,
   Button,
@@ -56,35 +60,18 @@ function PillCTA({ children, onClick, disabled }: { children: React.ReactNode; o
   )
 }
 
-// 表头「全选」复选框（支持半选 indeterminate）
-function HeadCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-}: {
-  checked: boolean
-  indeterminate: boolean
-  onChange: () => void
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate
-  }, [indeterminate])
+function VideoStatusLabel({ video }: { video: ShotVideo }) {
+  const generating = video.state === 'generating'
+  const done = video.state === 'done'
+  const Icon = generating ? LoaderCircle : done ? Check : Video
   return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={checked}
-      onChange={onChange}
-      className="h-[18px] w-[18px] rounded accent-brand"
-    />
+    <span className={`inline-flex h-[1.375rem] w-fit shrink-0 items-center gap-1.5 whitespace-nowrap text-[0.75rem] leading-none ${
+      generating ? 'text-[#dfc18f]' : done ? 'text-brand/80' : 'text-white/50'
+    }`}>
+      <Icon size="0.8125rem" strokeWidth={1.7} aria-hidden="true" className={`shrink-0 ${generating ? 'motion-safe:animate-spin' : ''}`} />
+      {generating ? '视频生成中' : done ? '视频已生成' : '视频待生成'}
+    </span>
   )
-}
-
-function videoStateInfo(v: ShotVideo): { text: string; cls: string; dot: string } {
-  if (v.state === 'generating') return { text: '正在生成视频', cls: 'text-amber-400', dot: 'bg-amber-400' }
-  if (v.state === 'done') return { text: '视频已生成', cls: 'text-brand', dot: 'bg-brand' }
-  return { text: '尚未生成视频', cls: 'text-faint', dot: 'bg-faint' }
 }
 
 const labelOf = (k: keyof Shot) => SHOT_FIELDS.find((f) => f.key === k)?.label ?? String(k)
@@ -106,32 +93,40 @@ function fuzzy(needle: string, hay: string): boolean {
   return false
 }
 
-// 每个字段列的「最小宽度 / 伸缩权重」：列少时按权重铺满可用宽度，列多时到最小宽度后横向滚动
-const COL_W: Partial<Record<keyof Shot, { min: number; grow: number }>> = {
-  shot: { min: 240, grow: 3 },
-  timeline: { min: 220, grow: 2.4 },
-  action: { min: 160, grow: 1.6 },
-  motion: { min: 160, grow: 1.6 },
-  subject: { min: 120, grow: 1 },
-  anchor: { min: 140, grow: 1.2 },
-  blocking: { min: 150, grow: 1.2 },
-  continuity: { min: 150, grow: 1.2 },
-  forbid: { min: 150, grow: 1.2 },
-  background: { min: 140, grow: 1.2 },
+// 使用紧凑的默认宽度，不随屏幕或字段数量拉伸；用户仍可独立拖宽每列。
+const COL_W: Partial<Record<keyof Shot, number>> = {
+  shot: 240, timeline: 240, action: 160, motion: 160, subject: 160,
+  anchor: 160, blocking: 160, continuity: 160, forbid: 160, background: 160,
 }
 
-// 拼自适应网格列：选择 44 / 镜头 150 / 时长 132 / …可见字段列（minmax 伸缩）… / 操作 76
-function buildGridTemplate(cols: { key: keyof Shot }[]): string {
-  const fields = cols.map((c) => {
-    const w = COL_W[c.key] ?? { min: 160, grow: 1.2 }
-    return `minmax(${w.min}px, ${w.grow}fr)`
-  })
-  return ['44px', '150px', '132px', ...fields, '76px'].join(' ')
+// 新布局单独记忆宽度，避免之前加宽过的列覆盖紧凑默认值。
+const COLUMN_WIDTHS_KEY = 'phanthy-shot-column-widths-compact-v1'
+const TIMELINE_WIDTH_MIGRATION_KEY = 'phanthy-timeline-width-v15'
+const FIXED_COLUMNS = { selection: 40, shot: 176, actions: 64 }
+type ResizeField = keyof Shot | 'shotInfo'
+type ColumnWidths = Partial<Record<ResizeField, number>>
+const defaultWidth = (key: ResizeField) => key === 'shotInfo' ? FIXED_COLUMNS.shot : COL_W[key]!
+
+function readColumnWidths(): ColumnWidths {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLUMN_WIDTHS_KEY) ?? '{}')
+    if (!localStorage.getItem(TIMELINE_WIDTH_MIGRATION_KEY)) {
+      if (stored && typeof stored === 'object') delete stored.timeline
+      localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(stored))
+      localStorage.setItem(TIMELINE_WIDTH_MIGRATION_KEY, '1')
+    }
+    const widths: ColumnWidths = {}
+    for (const key of ['shotInfo', ...SHOT_FIELDS.map(f => f.key)] as ResizeField[]) {
+      const width = stored?.[key]
+      if (typeof width === 'number' && Number.isFinite(width) && width >= defaultWidth(key)) widths[key] = width
+    }
+    return widths
+  } catch { return {} }
 }
 
 export default function Step4Shots({ project }: { project: Project }) {
   const { startShots, deleteShot, regenerateShot, startVideos } = useStore()
-  const pending = outdatedShots(project)
+  const pending = outdatedDesignShots(project)
   const missing = ungeneratedSegments(project)
   const blocked = shotGenerationBlocked(project)
   const [initialSelection, setInitialSelection] = useState<number[] | undefined>()
@@ -148,8 +143,22 @@ export default function Step4Shots({ project }: { project: Project }) {
   const [menu, setMenu] = useState<{ s: Shot; top: number; left: number } | null>(null)
   const [videoConfirm, setVideoConfirm] = useState<string[] | null>(null)
 
-  // 列可见性：默认显示前两组共 7 列；镜头/时长/选择/操作为固定列，不参与开关
+  // 列可见性：默认显示前两组共 7 列；镜头（含时长）/选择/操作为常驻列，不参与开关
   const [visibleFields, setVisibleFields] = useState<(keyof Shot)[]>(DEFAULT_VISIBLE_FIELDS)
+  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(readColumnWidths)
+  const [viewportWidth, setViewportWidth] = useState(0)
+  const [resizingField, setResizingField] = useState<ResizeField | null>(null)
+  const resize = useRef<{ key: ResizeField; x: number; width: number; pointerId: number } | null>(null)
+  useEffect(() => {
+    try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(columnWidths)) } catch { /* 浏览器禁止存储时仍可调整 */ }
+  }, [columnWidths])
+  useLayoutEffect(() => {
+    if (!resizingField) return
+    const { cursor, userSelect } = document.body.style
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => { document.body.style.cursor = cursor; document.body.style.userSelect = userSelect }
+  }, [resizingField])
   const [fieldsAnchor, setFieldsAnchor] = useState<{ top: number; left: number } | null>(null)
   // 筛选条件（多条件「并且」关系）
   const [filters, setFilters] = useState<{ field: keyof Shot; value: string }[]>([])
@@ -172,21 +181,25 @@ export default function Step4Shots({ project }: { project: Project }) {
 
   // 按 SHOT_FIELDS 原序取可见列；按「且」关系过滤出命中镜头
   const cols = SHOT_FIELDS.filter((f) => visibleFields.includes(f.key))
-  const gridTemplate = buildGridTemplate(cols)
+  const uiScale = getUiScale()
+  const widths = cols.map(c => columnWidths[c.key] ?? defaultWidth(c.key))
+  const tracks = [FIXED_COLUMNS.selection, columnWidths.shotInfo ?? FIXED_COLUMNS.shot, ...widths, FIXED_COLUMNS.actions]
+  const gridWidth = tracks.reduce((sum, width) => sum + width, 0) * uiScale
+  const gridTemplate = tracks.map(width => `${width * uiScale}px`).join(' ')
   const shownShots = shots.filter((s) => filters.every((f) => fuzzy(f.value, String(s[f.field] ?? ''))))
 
   // 「操作」列仅在表格横向溢出（内容撑到最右侧）时才吸附悬浮；列少时作为普通列
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [pinned, setPinned] = useState(false)
-  useEffect(() => {
+  const pinned = gridWidth > viewportWidth + 1
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const measure = () => setPinned(el.scrollWidth > el.clientWidth + 1)
+    const measure = () => setViewportWidth(el.clientWidth)
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [gridTemplate, shownShots.length])
+  }, [st])
 
   const toggleField = (k: keyof Shot) =>
     setVisibleFields((v) => (v.includes(k) ? v.filter((x) => x !== k) : [...v, k]))
@@ -215,12 +228,12 @@ export default function Step4Shots({ project }: { project: Project }) {
   }, [project.id, st, shots])
 
   const ignore = (id: string) => {
-    useStore.getState().dismissOutdated(id)
+    useStore.getState().dismissOutdated(id, 'design')
     setSel(selected => selected.filter(value => value !== id))
   }
   const ignoreAll = () => {
     const ids = new Set(pending.map(s => s.id))
-    useStore.getState().dismissAllOutdated()
+    useStore.getState().dismissAllOutdated('design')
     setSel(selected => selected.filter(id => !ids.has(id)))
   }
 
@@ -274,16 +287,16 @@ export default function Step4Shots({ project }: { project: Project }) {
           }`}
         >
           <span
-            className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg transition-colors ${
+            className={`flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-lg transition-colors ${
               fieldsAnchor ? 'bg-brand/20' : 'bg-white/5'
             }`}
           >
-            <Columns2 size={14} className={fieldsAnchor ? 'text-brand' : 'text-white/70'} />
+            <Columns2 size="0.875rem" className={fieldsAnchor ? 'text-brand' : 'text-white/70'} />
           </span>
-          <span className={`text-[13px] font-medium ${fieldsAnchor ? 'text-brand' : 'text-white/70'}`}>字段</span>
+          <span className={`text-[0.8125rem] font-medium ${fieldsAnchor ? 'text-brand' : 'text-white/70'}`}>字段</span>
           {visibleFields.length < SHOT_FIELDS.length && (
             <span
-              className={`text-[11px] font-semibold tabular-nums ${fieldsAnchor ? 'text-brand' : 'text-white/70'} opacity-70`}
+              className={`text-[0.6875rem] font-semibold tabular-nums ${fieldsAnchor ? 'text-brand' : 'text-white/70'} opacity-70`}
             >
               {visibleFields.length}/{SHOT_FIELDS.length}
             </span>
@@ -303,24 +316,34 @@ export default function Step4Shots({ project }: { project: Project }) {
           }`}
         >
           <span
-            className={`flex h-[26px] w-[26px] items-center justify-center rounded-lg transition-colors ${
+            className={`flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-lg transition-colors ${
               filterAnchor ? 'bg-brand/20' : 'bg-white/5'
             }`}
           >
-            <Filter size={14} className={filterAnchor ? 'text-brand' : 'text-white/70'} />
+            <Filter size="0.875rem" className={filterAnchor ? 'text-brand' : 'text-white/70'} />
           </span>
-          <span className={`text-[13px] font-medium ${filterAnchor ? 'text-brand' : 'text-white/70'}`}>筛选</span>
+          <span className={`text-[0.8125rem] font-medium ${filterAnchor ? 'text-brand' : 'text-white/70'}`}>筛选</span>
           {filters.length > 0 && (
-            <span className="rounded-full bg-brand px-[7px] py-[3px] text-[11px] font-semibold tabular-nums text-black">
+            <span className="rounded-full bg-brand px-[0.4375rem] py-[0.1875rem] text-[0.6875rem] font-semibold tabular-nums text-black">
               {filters.length}
             </span>
           )}
         </button>
 
+        {Object.keys(columnWidths).length > 0 && (
+          <button
+            type="button"
+            onClick={() => setColumnWidths({})}
+            className="text-[0.75rem] text-muted transition-colors hover:text-white"
+          >
+            恢复默认列宽
+          </button>
+        )}
+
         {filters.map((f, i) => (
           <span
             key={`${f.field}-${i}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-1 text-[12px] text-brand"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-1 text-[0.75rem] text-brand"
           >
             <span className="text-muted">{labelOf(f.field)}</span>
             <span className="text-white/80">{f.value}</span>
@@ -329,7 +352,7 @@ export default function Step4Shots({ project }: { project: Project }) {
               className="text-muted transition-colors hover:text-white"
               title="移除该条件"
             >
-              <X size={12} />
+              <X size="0.75rem" />
             </button>
           </span>
         ))}
@@ -338,25 +361,25 @@ export default function Step4Shots({ project }: { project: Project }) {
           <>
             <button
               onClick={() => setFilters([])}
-              className="text-[12px] text-muted transition-colors hover:text-white"
+              className="text-[0.75rem] text-muted transition-colors hover:text-white"
             >
               清除筛选
             </button>
-            <span className="text-[12px] text-faint">筛选结果 {shownShots.length} 条</span>
+            <span className="text-[0.75rem] text-faint">筛选结果 {shownShots.length} 条</span>
           </>
         )}
       </div>
 
-      {/* 表格：统一深色表格（对齐设计稿）——列少自适应铺满、列多横向滚动 */}
+      {/* 表格：统一深色表格（对齐设计稿）——紧凑默认列宽，内容超出时横向滚动 */}
       <div ref={scrollRef} className="table-scroll overflow-x-auto rounded-lg border border-white/10 bg-card">
-        <div className="w-full min-w-[720px]">
+        <div className="relative" style={{ width: gridWidth }}>
           {/* 表头（#101010 深色栏） */}
           <div
-            className="grid items-stretch bg-[#101010] text-[13px] text-white/90"
+            className="grid items-stretch bg-[#101010] text-[0.8125rem] text-white/90"
             style={{ gridTemplateColumns: gridTemplate }}
           >
             <div className="flex h-12 items-center justify-center">
-              <HeadCheckbox
+              <Checkbox aria-label="全选"
                 checked={shownShots.length > 0 && shownShots.every((s) => sel.includes(s.id))}
                 indeterminate={
                   shownShots.some((s) => sel.includes(s.id)) && !shownShots.every((s) => sel.includes(s.id))
@@ -371,9 +394,8 @@ export default function Step4Shots({ project }: { project: Project }) {
               />
             </div>
             <div className="flex h-12 items-center border-r border-white/[0.06] px-3">镜头</div>
-            <div className="flex h-12 items-center border-r border-white/[0.06] px-3">时长</div>
             {cols.map((c) => (
-              <div key={c.key} className="flex h-12 items-center border-r border-white/[0.06] px-3">
+              <div key={c.key} className="relative flex h-12 items-center border-r border-white/[0.06] px-3">
                 {c.label}
               </div>
             ))}
@@ -388,10 +410,10 @@ export default function Step4Shots({ project }: { project: Project }) {
 
           {shownShots.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <div className="text-[13px] text-muted">没有符合条件的镜头</div>
+              <div className="text-[0.8125rem] text-muted">没有符合条件的镜头</div>
               <button
                 onClick={() => setFilters([])}
-                className="text-[13px] text-brand transition-colors hover:text-brand-dim"
+                className="text-[0.8125rem] text-brand transition-colors hover:text-brand-dim"
               >
                 清除筛选
               </button>
@@ -415,12 +437,69 @@ export default function Step4Shots({ project }: { project: Project }) {
                   onCommit={(patch) => useStore.getState().updateShot(s.id, patch)}
                   onMenu={(e) => {
                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    setMenu({ s, top: r.bottom + 4, left: r.left - 168 })
+                    setMenu({ s, top: r.bottom + 4, left: r.right - 224 })
                   }}
                 />
               ))}
             </div>
           )}
+          {/* 一条贯穿表头及所有镜头行的拖动区域，不拦截单元格内容。 */}
+          <div className="pointer-events-none absolute inset-0 grid" style={{ gridTemplateColumns: gridTemplate }}>
+            <div />
+            {([{ key: 'shotInfo', label: '镜头' }, ...cols] as { key: ResizeField; label: string }[]).map(c => (
+              <div key={c.key} className="relative min-w-0">
+                <div
+                  role="separator"
+                  aria-label={`调整${c.label}列宽`}
+                  aria-orientation="vertical"
+                  aria-valuemin={defaultWidth(c.key) * uiScale}
+                  aria-valuenow={(columnWidths[c.key] ?? defaultWidth(c.key)) * uiScale}
+                  tabIndex={0}
+                  title="拖动调整列宽，双击恢复默认宽度"
+                  className="group pointer-events-auto absolute -right-1 top-0 z-[5] h-full w-2 touch-none cursor-col-resize select-none outline-none"
+                  onPointerDown={e => {
+                    if (e.button !== 0) return
+                    e.preventDefault(); e.stopPropagation()
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    resize.current = { key: c.key, x: e.clientX, width: columnWidths[c.key] ?? defaultWidth(c.key), pointerId: e.pointerId }
+                    setResizingField(c.key)
+                  }}
+                  onPointerMove={e => {
+                    const drag = resize.current
+                    if (!drag || drag.key !== c.key || drag.pointerId !== e.pointerId) return
+                    e.preventDefault(); e.stopPropagation()
+                    const width = Math.max(defaultWidth(c.key), drag.width + (e.clientX - drag.x) / uiScale)
+                    setColumnWidths(previous => ({ ...previous, [c.key]: width }))
+                  }}
+                  onPointerUp={e => {
+                    if (resize.current?.pointerId !== e.pointerId) return
+                    resize.current = null; setResizingField(null)
+                    e.currentTarget.releasePointerCapture(e.pointerId)
+                  }}
+                  onPointerCancel={() => { resize.current = null; setResizingField(null) }}
+                  onLostPointerCapture={() => { resize.current = null; setResizingField(null) }}
+                  onClick={e => e.stopPropagation()}
+                  onDoubleClick={e => {
+                    e.preventDefault(); e.stopPropagation()
+                    setColumnWidths(previous => { const next = { ...previous }; delete next[c.key]; return next })
+                  }}
+                  onKeyDown={e => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(e.key)) return
+                    e.preventDefault(); e.stopPropagation()
+                    setColumnWidths(previous => {
+                      const next = { ...previous }
+                      if (e.key === 'Home') delete next[c.key]
+                      else next[c.key] = Math.max(defaultWidth(c.key), (previous[c.key] ?? defaultWidth(c.key)) + (e.key === 'ArrowRight' ? 16 : -16))
+                      return next
+                    })
+                  }}
+                >
+                  <span className={`pointer-events-none absolute inset-y-0 left-[0.1875rem] w-[0.125rem] transition-colors group-hover:bg-brand group-focus-visible:bg-brand ${resizingField === c.key ? 'bg-brand' : 'bg-transparent'}`} />
+                </div>
+              </div>
+            ))}
+            <div />
+          </div>
         </div>
       </div>
 
@@ -428,14 +507,14 @@ export default function Step4Shots({ project }: { project: Project }) {
         <span>已选择 {sel.length}/{shots.length} 个镜头</span>
         {pending.length > 0 ? <>
           <span className="text-[#5d646a]">·</span>
-          <span className="text-[#7c838a]">其中 {pending.filter(s => sel.includes(s.id)).length} 个因{pending.every(s => s.outdated?.every(r => r.kind === 'segText')) ? '剧本改动' : '内容改动'}待更新</span>
+          <span className="text-[#7c838a]">其中 {pending.filter(s => sel.includes(s.id)).length} 个因{pending.every(s => shotOutdatedReasons(s).every(r => r.kind === 'segText')) ? '剧本改动' : '内容改动'}待更新</span>
           <button type="button" className="text-white/35 transition-colors hover:text-white/70" onClick={ignoreAll}>全部忽略</button>
         </> : <span className="text-[#7c838a]">，可取消个别镜头</span>}
       </div>}>
         <PillCTA disabled={!sel.length} onClick={() => setVideoConfirm(sel)}>
           {sel.length ? (
             <>
-              <span className="text-[12px] leading-none">✦</span>
+              <span className="text-[0.75rem] leading-none">✦</span>
               {fmt(shots.filter((s) => sel.includes(s.id)).reduce((n, s) => n + videoCost(s.dur), 0))} {sel.length === shots.length ? '生成全部' : '生成'} {sel.length} 段视频
             </>
           ) : (
@@ -464,11 +543,12 @@ export default function Step4Shots({ project }: { project: Project }) {
 
       {/* 行 ⋯ 菜单：仅生成 / 删除 */}
       {menu && (
-        <Popover anchor={menu} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { setDetailId(menu.s.id); setMenu(null) }}>编辑镜头详情</MenuItem>
-          <div title={blocked}><MenuItem disabled={!!blocked} onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem></div>
-          <MenuItem onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
-          <MenuItem danger onClick={() => { setDeleteFor(menu.s); setMenu(null) }}>
+        <Popover anchor={menu} width={224} variant="menu" onClose={() => setMenu(null)}>
+          <MenuItem icon={<Pencil size="1rem" />} onClick={() => { setDetailId(menu.s.id); setMenu(null) }}>编辑镜头详情</MenuItem>
+          <div title={blocked}><MenuItem icon={<RotateCcw size="1rem" />} disabled={!!blocked} onClick={() => { regenerateShot(menu.s.id); setMenu(null) }}>重新生成该镜头</MenuItem></div>
+          <MenuItem icon={<Video size="1rem" />} onClick={() => { setVideoConfirm([menu.s.id]); setMenu(null) }}>生成该镜头视频</MenuItem>
+          <div className="my-1.5 border-t border-white/[0.08]" />
+          <MenuItem icon={<Trash2 size="1rem" />} danger onClick={() => { setDeleteFor(menu.s); setMenu(null) }}>
             删除镜头
           </MenuItem>
         </Popover>
@@ -479,14 +559,14 @@ export default function Step4Shots({ project }: { project: Project }) {
         <Popover anchor={fieldsAnchor} onClose={() => setFieldsAnchor(null)} width={360}>
           <div className="px-4 py-3.5">
             <div className="mb-4 flex items-center justify-between">
-              <span className="text-[15px] font-semibold text-white">显示字段</span>
+              <span className="text-[0.9375rem] font-semibold text-white">显示字段</span>
               <button
                 onClick={() =>
                   setVisibleFields((v) =>
                     v.length === SHOT_FIELDS.length ? DEFAULT_VISIBLE_FIELDS : SHOT_FIELDS.map((f) => f.key),
                   )
                 }
-                className="text-[13px] text-muted transition-colors hover:text-white"
+                className="text-[0.8125rem] text-muted transition-colors hover:text-white"
               >
                 {visibleFields.length === SHOT_FIELDS.length ? '重置' : '全选'}
               </button>
@@ -494,7 +574,7 @@ export default function Step4Shots({ project }: { project: Project }) {
             <div className="space-y-4">
               {SHOT_GROUPS.map((g) => (
                 <div key={g.title}>
-                  <div className="mb-2.5 text-[12px] text-faint">{g.title}</div>
+                  <div className="mb-2.5 text-[0.75rem] text-faint">{g.title}</div>
                   <div className="flex flex-wrap gap-2.5">
                     {g.fields.map((k) => {
                       const on = visibleFields.includes(k)
@@ -502,7 +582,7 @@ export default function Step4Shots({ project }: { project: Project }) {
                         <button
                           key={k}
                           onClick={() => toggleField(k)}
-                          className={`rounded-xl border px-4 py-2 text-[14px] transition-colors ${
+                          className={`rounded-xl border px-4 py-2 text-[0.875rem] transition-colors ${
                             on
                               ? 'border-brand/40 bg-brand/[0.08] text-brand-light'
                               : 'border-white/10 bg-transparent text-white/30 hover:border-line hover:text-muted'
@@ -524,7 +604,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       {filterAnchor && (
         <Popover anchor={filterAnchor} onClose={() => setFilterAnchor(null)} width={440}>
           <div className="px-4 py-3.5">
-            <div className="mb-3 text-[15px] font-semibold text-white">筛选条件</div>
+            <div className="mb-3 text-[0.9375rem] font-semibold text-white">筛选条件</div>
             <FilterComposer
               field={draftField}
               value={draftValue}
@@ -556,11 +636,12 @@ export default function Step4Shots({ project }: { project: Project }) {
         <VideoConfirmModal
           shots={shots.filter((s) => videoConfirm.includes(s.id))}
           balance={project.balance}
+          initialModel={project.lastVideoModel}
           onClose={() => setVideoConfirm(null)}
-          onConfirm={() => {
+          onConfirm={(model) => {
             const ids = videoConfirm
             setVideoConfirm(null)
-            startVideos(ids)
+            startVideos(ids, model)
           }}
         />
       )}
@@ -598,53 +679,56 @@ function ShotRow({
   onCommit: (patch: Partial<Shot>) => void
   onMenu: (e: React.MouseEvent) => void
 }) {
-  const vi = videoStateInfo(shot.video)
   return (
     <div
       id={`shot-${shot.id}`}
-      className={`grid min-h-[120px] items-stretch border-b border-white/10 transition-colors last:border-b-0 ${
+      className={`shot-table-row grid items-stretch border-b border-white/10 transition-colors last:border-b-0 ${
         active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.02]'
       } ${flash ? 'row-flash' : ''}`}
-      style={{ gridTemplateColumns: gridTemplate }}
+      style={{ gridTemplateColumns: gridTemplate, height: '7.5rem', gridTemplateRows: 'minmax(0, 1fr)' }}
     >
       {/* 选择 */}
-      <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={selected} onChange={onToggleSelect} className="accent-brand" />
+      <div className="flex items-start justify-center pt-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex h-6 items-center">
+          <Checkbox aria-label={`选择镜头 ${no2(shot.no)}`} checked={selected} onChange={onToggleSelect} />
+        </div>
       </div>
 
       {/* 镜头信息 */}
-      <div className="flex flex-col gap-1 border-r border-white/[0.06] px-3 py-3">
-        <span className="text-[14px] font-medium tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
-        <span className={`inline-flex items-center gap-1.5 text-[12px] ${vi.cls}`}>
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${vi.dot}`} />
-          {vi.text}
-        </span>
-        {!!shot.outdated?.length && <OutdatedBadge title={shot.outdated.map(r => r.text).join('\n')} onIgnore={onIgnore} ignoreLabel={`忽略镜头 ${no2(shot.no)} 的改动`} />}
+      <div className="flex min-w-0 flex-col items-start gap-1 border-r border-white/[0.06] px-3 py-3">
+        <div className="flex h-6 w-full shrink-0 items-center justify-between gap-2 whitespace-nowrap">
+          <span className="shrink-0 text-[0.8125rem] font-medium leading-none tabular-nums text-white/90">镜头 {no2(shot.no)}</span>
+          <ShotDurationCell project={project} shot={shot} onPreview={onDurationPreview} />
+        </div>
+        <div className="flex h-[1.375rem] items-center gap-2 whitespace-nowrap text-[0.75rem] leading-none" data-shot-status>
+          {shot.video.state !== 'generating' && !!shotOutdatedReasons(shot).length ? <>
+            <span title={shotOutdatedReasons(shot).map(r => r.text).join('\n')} className="inline-flex h-[1.375rem] items-center gap-1.5 text-[#f2b544]">
+              <AlertTriangle size="0.8125rem" strokeWidth={1.7} aria-hidden="true" className="shrink-0" />待更新
+            </span>
+            <button type="button" aria-label={`忽略镜头 ${no2(shot.no)} 的改动`} onClick={e => { e.stopPropagation(); onIgnore() }} className="shot-ignore text-white/35 transition-colors hover:text-white/70">忽略</button>
+          </> : <VideoStatusLabel video={shot.video} />}
+        </div>
       </div>
-
-      <ShotDurationCell project={project} shot={shot} onPreview={onDurationPreview} />
-
       {/* 可见字段列（均可就地编辑） */}
       {cols.map((c) => (
         <InlineCellEditor
           key={c.key}
           field={c.key}
+          duration={shot.dur}
+          reflowRevision={c.key === 'timeline' ? timelineReflowRevision(project.id, shot.id) : 0}
           assets={project.assets}
           assetIds={shot.assetIds ?? []}
           value={c.key === 'timeline' ? timelineLines(shot.timeline).join('\n') : String(shot[c.key] ?? '')}
           onCommit={(v) => onCommit({ [c.key]: v } as Partial<Shot>)}
           readView={
             c.key === 'timeline' ? (
-              <div className="min-h-[60px] space-y-1">
+              <div className="shot-timeline-preview space-y-0.5">
                 {timelineLines(shot.timeline).map((line, i) => (
-                  <div key={i} className="flex items-start gap-2 text-white/80">
-                    <span className="w-7 shrink-0 select-none text-right text-white/40">{i < 20 ? String.fromCodePoint(0x2460 + i) : `${i + 1}.`}</span>
-                    <span className="min-w-0 whitespace-pre-wrap break-words"><MentionText text={line || ' '} assets={project.assets} /></span>
-                  </div>
+                  <div key={i} className="whitespace-pre-wrap break-words"><MentionText text={line} assets={project.assets} /></div>
                 ))}
               </div>
             ) : (
-              <div className="line-clamp-3 whitespace-pre-line"><MentionText text={String(shot[c.key] ?? '')} assets={project.assets} /></div>
+              <div className="whitespace-pre-line break-words"><MentionText text={String(shot[c.key] ?? '')} assets={project.assets} /></div>
             )
           }
         />
@@ -652,17 +736,17 @@ function ShotRow({
 
       {/* 操作（横向 ⋯）：仅在表格横向溢出时吸附悬浮到最右侧，否则作为普通列居中 */}
       <div
-        className={`flex items-center justify-center px-3 py-3 ${
+        className={`flex items-start justify-center px-3 py-3 ${
           pinned ? 'sticky right-0 z-10 border-l border-white/10 shadow-[-2px_0_6px_rgba(0,0,0,0.5)]' : ''
         } ${active ? 'bg-[#202325]' : 'bg-card'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          className="inline-flex items-center justify-center rounded-full border border-white/10 px-3 py-1.5 text-white/70 transition-colors hover:border-white/25 hover:text-white"
+          className="inline-flex h-6 items-center justify-center rounded-full border border-white/10 px-3 text-white/70 transition-colors hover:border-white/25 hover:text-white"
           onClick={onMenu}
           title="更多"
         >
-          <MoreHorizontal size={16} />
+          <MoreHorizontal size="1rem" />
         </button>
       </div>
     </div>
@@ -689,12 +773,12 @@ function FilterComposer({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="m-1.5 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-[13px] font-medium text-brand transition-colors hover:bg-brand/[0.16]"
+        className="m-1.5 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-[0.8125rem] font-medium text-brand transition-colors hover:bg-brand/[0.16]"
       >
         {labelOf(field)}
-        <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size="0.875rem" className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      <span className="shrink-0 px-2 text-[12px] text-faint">包含</span>
+      <span className="shrink-0 px-2 text-[0.75rem] text-faint">包含</span>
       <input
         value={value}
         onChange={(e) => onValue(e.target.value)}
@@ -702,10 +786,10 @@ function FilterComposer({
           if (e.key === 'Enter') onAdd()
         }}
         placeholder="输入关键词，回车添加"
-        className="mr-1.5 w-full rounded-lg bg-transparent px-2.5 py-2.5 text-[14px] outline-none placeholder:text-faint"
+        className="mr-1.5 w-full rounded-lg bg-transparent px-2.5 py-2.5 text-[0.875rem] outline-none placeholder:text-faint"
       />
       {open && (
-        <div className="absolute left-0 top-full z-10 mt-1 max-h-56 w-48 overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
+        <div className="floating-surface absolute left-0 top-full z-10 mt-2 max-h-56 w-48 overflow-auto rounded-xl border p-1.5 animate-fadeUp">
           {SHOT_FIELDS.map((f) => (
             <button
               key={f.key}
@@ -714,12 +798,12 @@ function FilterComposer({
                 onField(f.key)
                 setOpen(false)
               }}
-              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-line ${
+              className={`flex min-h-9 w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[0.8125rem] hover:bg-white/[0.07] ${
                 f.key === field ? 'text-brand' : 'text-white/90'
               }`}
             >
               <span>{f.label}</span>
-              {f.key === field && <Check size={14} className="ml-2 shrink-0" />}
+              {f.key === field && <Check size="0.875rem" className="ml-2 shrink-0" />}
             </button>
           ))}
         </div>
@@ -767,7 +851,7 @@ function FilterPreview({
   if (!draft && filters.length === 0) {
     return (
       <div className="mt-3.5 border-t border-line pt-3">
-        <div className="py-4 text-center text-[12px] text-faint">输入关键词，实时预览命中的镜头</div>
+        <div className="py-4 text-center text-[0.75rem] text-faint">输入关键词，实时预览命中的镜头</div>
       </div>
     )
   }
@@ -783,16 +867,16 @@ function FilterPreview({
 
   return (
     <div className="mt-3.5 border-t border-line pt-3">
-      <div className="mb-2 flex items-center justify-between text-[12px] text-faint">
+      <div className="mb-2 flex items-center justify-between text-[0.75rem] text-faint">
         <span className="tracking-wider">匹配镜头</span>
         <span className="tabular-nums">
           {hits.length}/{shots.length} 个镜头
         </span>
       </div>
       {hits.length === 0 ? (
-        <div className="py-6 text-center text-[13px] text-faint">没有符合条件的镜头</div>
+        <div className="py-6 text-center text-[0.8125rem] text-faint">没有符合条件的镜头</div>
       ) : (
-        <div className="-mx-1 flex max-h-[260px] flex-col gap-2 overflow-y-auto px-1 pb-1">
+        <div className="-mx-1 flex max-h-[16.25rem] flex-col gap-2 overflow-y-auto px-1 pb-1">
           {hits.map((s) => {
             const snippet = String(s[draftField] ?? '').replace(/\s+/g, ' ').trim()
             return (
@@ -804,12 +888,12 @@ function FilterPreview({
                 className="group w-full rounded-[10px] border border-white/[0.06] bg-white/[0.03] px-3.5 py-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/[0.06]"
               >
                 <div className="flex items-center gap-2.5">
-                  <span className="rounded bg-brand px-1.5 py-1 text-[10.5px] font-semibold leading-none tabular-nums text-black">
+                  <span className="rounded bg-brand px-1.5 py-1 text-[0.65625rem] font-semibold leading-none tabular-nums text-black">
                     {no2(s.no)}
                   </span>
-                  <span className="text-[11.5px] text-white/40">{fmtDur(s.dur)}</span>
+                  <span className="text-[0.71875rem] text-white/40">{fmtDur(s.dur)}</span>
                 </div>
-                <div className="mt-2 line-clamp-2 text-[12.5px] leading-relaxed text-white/[0.62]">
+                <div className="mt-2 line-clamp-2 text-[0.78125rem] leading-relaxed text-white/[0.62]">
                   {snippet ? <MentionText text={snippet} assets={assets} renderPlain={text => highlightText(text, terms)} /> : '（该字段为空）'}
                 </div>
               </button>
@@ -823,25 +907,35 @@ function FilterPreview({
 
 /* ---------- 单元格就地编辑：点击后原地浮出编辑框，停输入自动保存 ---------- */
 function InlineCellEditor({
-  field, assets, assetIds,
+  field, assets, assetIds, duration, reflowRevision,
   value,
   onCommit,
   readView,
 }: {
   field: keyof Shot
+  duration: number
+  reflowRevision: number
   assets: Project['assets']
   assetIds: string[]
   value: string
   onCommit: (v: string) => void
   readView: React.ReactNode
 }) {
+  const { ref: reflowRef, busy } = useTimelineReflow(reflowRevision)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
-  const { status, schedule, flush } = useAutoSave((v) => onCommit(v))
+  const { status, schedule, flush, hasPending } = useAutoSave((v) => onCommit(v))
+
+  useLayoutEffect(() => {
+    const next = hasPending() && field === 'timeline' ? normalizeTimeline(draft, duration) : value
+    setDraft(next)
+    if (hasPending() && field === 'timeline') schedule(next)
+  }, [reflowRevision])
 
   const start = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (busy) return
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setRect({ top: r.top, left: r.left, width: r.width })
     setDraft(value)
@@ -854,10 +948,8 @@ function InlineCellEditor({
   }
 
   return (
-    <div className="h-full border-r border-white/[0.06] px-3 py-3 text-[13px] leading-relaxed text-white/90">
-      <div onClick={start} className="cursor-text">
-        {readView}
-      </div>
+    <div ref={reflowRef} aria-busy={busy} className="relative min-h-0 border-r border-white/[0.06] text-[0.8125rem] leading-relaxed text-white/80" data-shot-field={field}>
+      <TimelineReflow busy={busy} className="h-full"><ShotCellPreview onClick={start}>{readView}</ShotCellPreview></TimelineReflow>
 
       {editing && rect && (
         <div className="fixed inset-0 z-50" onMouseDown={close}>
@@ -870,13 +962,12 @@ function InlineCellEditor({
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="max-h-[360px] min-h-[132px] overflow-auto px-4 py-3 text-[13.5px] leading-relaxed text-white/90" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
-              <ShotTextEditor value={draft} timeline={field === 'timeline'} assets={assets} assetIds={assetIds} label={labelOf(field)} autoFocus onEscape={close}
-                onChange={v => { setDraft(v); schedule(v) }} />
-              <FieldNotes field={field} value={draft} />
+            <div className="max-h-[22.5rem] min-h-[8.25rem] overflow-auto px-4 py-3 text-[0.84375rem] leading-relaxed text-white/90" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
+              <TimelineReflow busy={busy}><ShotTextEditor duration={duration} value={draft} timeline={field === 'timeline'} assets={assets} assetIds={assetIds} label={labelOf(field)} autoFocus onEscape={close}
+                onChange={v => { setDraft(v); schedule(v) }} /></TimelineReflow>
             </div>
             <div className="flex items-center justify-between border-t border-line/60 px-4 py-2">
-              <span className="text-[12px] text-faint">自动保存</span>
+              <span className="text-[0.75rem] text-faint">自动保存</span>
               <SaveBadge status={status} />
             </div>
           </div>
@@ -889,12 +980,15 @@ function InlineCellEditor({
 /* ---------- 右侧详情面板：分组字段 + 更多设定折叠；全自动保存，无保存按钮 ---------- */
 function ShotDetailDrawer({ shot, assets, onClose }: { shot: Shot; assets: Project['assets']; onClose: () => void }) {
   const updateShot = useStore((s) => s.updateShot)
+  const projectId = useStore(s => s.currentId) ?? ''
+  const revision = timelineReflowRevision(projectId, shot.id)
+  const { ref: reflowRef, busy } = useTimelineReflow(revision)
   const [draft, setDraft] = useState<Record<string, string>>(() => snapshot(shot))
   const draftRef = useRef(draft)
   draftRef.current = draft
   const [moreOpen, setMoreOpen] = useState(false)
 
-  const { status, schedule, flush } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
+  const { status, schedule, flush, hasPending } = useAutoSave(() => updateShot(shot.id, draftRef.current as Partial<Shot>))
 
   const setField = (k: keyof Shot, v: string) => {
     setDraft((d) => {
@@ -911,33 +1005,39 @@ function ShotDetailDrawer({ shot, assets, onClose }: { shot: Shot; assets: Proje
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  useLayoutEffect(() => {
+    const timeline = hasPending() ? normalizeTimeline(draftRef.current.timeline, shot.dur) : shot.timeline
+    const next = { ...draftRef.current, timeline }
+    draftRef.current = next
+    setDraft(next)
+  }, [revision])
+
   // 单个字段：标签在上、可编辑值框在下（对齐 Figma node 6:6577）
   const renderField = (k: keyof Shot) => (
     <div key={k} className="flex flex-col gap-2">
-      <div className="text-[14px] leading-[18px] text-white/60">{labelOf(k)}</div>
-      <div className="rounded-md border border-white/10 bg-card px-3 py-3.5 text-[14px] leading-relaxed text-white/90 focus-within:border-brand/50" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
-        <ShotTextEditor value={draft[k]} timeline={k === 'timeline'} assets={assets} assetIds={shot.assetIds ?? []} label={labelOf(k)} onChange={v => setField(k, v)} onEscape={onClose} />
+      <div className="text-[0.875rem] leading-[1.125rem] text-white/60">{labelOf(k)}</div>
+      <div ref={k === 'timeline' ? reflowRef : undefined} aria-busy={k === 'timeline' && busy} className="relative rounded-md border border-white/10 bg-card px-3 py-3.5 text-[0.875rem] leading-relaxed text-white/90 focus-within:border-brand/50" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) flush() }}>
+        <TimelineReflow busy={k === 'timeline' && busy}><ShotTextEditor duration={shot.dur} value={draft[k]} timeline={k === 'timeline'} assets={assets} assetIds={shot.assetIds ?? []} label={labelOf(k)} onChange={v => setField(k, v)} onEscape={onClose} /></TimelineReflow>
       </div>
-      <FieldNotes field={k} value={draft[k]} />
     </div>
   )
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60 animate-fadeUp" onMouseDown={onClose}>
       <div
-        className="flex h-full w-[560px] max-w-[92vw] flex-col bg-[#202224] shadow-2xl animate-slideInRight"
+        className="flex h-full w-[35rem] max-w-[92vw] flex-col bg-[#202224] shadow-2xl animate-slideInRight"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 头部：64px，镜头标题 18px */}
         <div className="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-6">
-          <div className="text-[18px] font-medium leading-8 text-white/90">镜头 {no2(shot.no)}</div>
+          <div className="text-[1.125rem] font-medium leading-8 text-white/90">镜头 {no2(shot.no)}</div>
           <SaveBadge status={status} />
           <button
             className="ml-auto text-white/50 transition-colors hover:text-white"
             onClick={onClose}
             aria-label="关闭"
           >
-            <X size={16} />
+            <X size="1rem" />
           </button>
         </div>
 
@@ -955,13 +1055,13 @@ function ShotDetailDrawer({ shot, assets, onClose }: { shot: Shot; assets: Proje
                   <button
                     type="button"
                     onClick={() => setMoreOpen((o) => !o)}
-                    className="flex items-center gap-1.5 text-[16px] font-medium leading-[18px] text-white/90"
+                    className="flex items-center gap-1.5 text-[1rem] font-medium leading-[1.125rem] text-white/90"
                   >
                     {g.title}
-                    <ChevronDown size={16} className={`transition-transform ${moreOpen ? '' : '-rotate-90'}`} />
+                    <ChevronDown size="1rem" className={`transition-transform ${moreOpen ? '' : '-rotate-90'}`} />
                   </button>
                 ) : (
-                  <div className="text-[16px] font-medium leading-[18px] text-white/90">{g.title}</div>
+                  <div className="text-[1rem] font-medium leading-[1.125rem] text-white/90">{g.title}</div>
                 )}
                 {open && g.fields.map(renderField)}
               </div>
@@ -982,8 +1082,8 @@ function snapshot(s: Shot): Record<string, string> {
 
 function ShotDurationCell({ project, shot, onPreview }: { project: Project; shot: Shot; onPreview: (dur: number | undefined) => void }) {
   const seg = project.segments.find((s) => s.id === shot.segId)
-  return <div className="border-r border-white/[0.06] px-3 py-3">
-    <DurationStepper onPreview={onPreview} variant="inline" title={`镜头 ${no2(shot.no)} 时长`} value={seg?.dur ?? shot.dur}
+  return <div className="shrink-0" onClick={e => e.stopPropagation()}>
+    <DurationStepper onPreview={onPreview} variant="inline" size="xs" title={`镜头 ${no2(shot.no)} 时长`} value={seg?.dur ?? shot.dur}
       disabled={project.shotStatus === 'generating' || !seg}
       onChange={(dur) => {
         if (seg) useStore.getState().updateSegment(seg.id, { dur })
@@ -991,8 +1091,25 @@ function ShotDurationCell({ project, shot, onPreview }: { project: Project; shot
   </div>
 }
 
-// These are advice only, shared with model validation and refreshed as the draft changes.
-function FieldNotes({ field, value }: { field: keyof Shot; value: string }) {
-  const notes = styleNotes(field === 'timeline' ? { timeline: timelineLines(value) } : { [field]: value }, '')
-  return notes.length ? <div className="mt-2 space-y-1 text-xs leading-relaxed text-white/40" role="status">{notes.map(note => <div key={note}>{note.trim()}</div>)}</div> : null
+// Measure overflow again when a column is resized; short descriptions stay fully opaque.
+function ShotCellPreview({ children, onClick }: { children: React.ReactNode; onClick: (e: React.MouseEvent) => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current!
+    const measure = () => setOverflow(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    return () => observer.disconnect()
+  }, [children])
+  return <div ref={ref} tabIndex={overflow ? 0 : undefined} onClick={e => {
+    // 滚动条上的点击仅滚动，不打开编辑浮层。
+    const bounds = e.currentTarget.getBoundingClientRect()
+    if (e.currentTarget.clientWidth > 0 && e.clientX >= bounds.left + e.currentTarget.clientWidth) return
+    onClick(e)
+  }} className="shot-cell-preview absolute inset-3 cursor-text overflow-x-hidden overflow-y-auto outline-none" data-overflow={overflow} title={overflow ? '滚动查看全文，点击编辑' : undefined}>
+    {children}
+  </div>
 }

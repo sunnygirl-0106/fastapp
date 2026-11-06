@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties } from 'react'
-import { outdatedShots } from '@/utils/project'
+import { outdatedDesignShots, outdatedVideos } from '@/utils/project'
 import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 
@@ -76,37 +76,40 @@ export default function StepBar({
   const unlocked = stepUnlocked(project)
   const done = stepDone(project)
   const readonly = stepLocked(project)
+  const designCount = outdatedDesignShots(project).length
+  const videoCount = outdatedVideos(project).length
 
   const stateOf = (i: number): NodeState => (step === i + 1 ? 'active' : done[i] ? 'done' : 'todo')
 
   return (
     <div className="flex justify-center px-11 pb-2 pt-6">
-      <div className="flex w-full max-w-[820px] items-start">
+      <div className="flex w-full max-w-[51.25rem] items-start">
         {STEPS.map((name, i) => {
           const n = i + 1
           const st = stateOf(i)
           const notReached = !unlocked[i]
-          const hint = i === 3 && project.shotStatus !== 'generating' && outdatedShots(project).length ? `${outdatedShots(project).length} 个镜头待更新` : ''
+          const hint = i === 3 && project.shotStatus !== 'generating' && designCount ? `${designCount} 个镜头待更新`
+            : i === 4 && videoCount ? `${videoCount} 个视频待更新` : ''
           return (
             <Fragment key={n}>
               <button
                 disabled={notReached}
                 onClick={() => !notReached && goStep(n)}
                 title={notReached ? '完成上一步后解锁' : readonly[i] ? '该步骤已用于后续生成，仅供查看' : hint}
-                className={`flex w-[100px] shrink-0 flex-col items-center gap-[13px] bg-transparent ${
+                className={`flex w-[6.25rem] shrink-0 flex-col items-center gap-[0.8125rem] bg-transparent ${
                   notReached ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
               >
                 {/* 菱形节点 */}
                 <div className="relative flex h-10 w-10 items-center justify-center">
-                  {hint && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-400 ring-[1.5px] ring-[#111213]" />}
+                  {hint && <span className="absolute right-0 top-0 h-[0.3125rem] w-[0.3125rem] rounded-full bg-amber-400 ring-[1.5px] ring-[#111213]" />}
                   {st === 'active' && <span className="om-ripple" />}
                   <span
-                    className="flex h-[26px] w-[26px] rotate-45 items-center justify-center rounded-lg"
+                    className="flex h-[1.625rem] w-[1.625rem] rotate-45 items-center justify-center rounded-lg"
                     style={GEM[st]}
                   >
                     <span
-                      className="-rotate-45 text-[13px] font-extrabold tabular-nums leading-none"
+                      className="-rotate-45 text-[0.8125rem] font-extrabold tabular-nums leading-none"
                       style={{ color: GLYPH_COLOR[st] }}
                     >
                       {st === 'done' ? '✓' : n}
@@ -117,13 +120,13 @@ export default function StepBar({
                 {/* 标签 + STEP 编号 */}
                 <div className="flex flex-col items-center gap-1">
                   <div
-                    className="whitespace-nowrap text-[15px] leading-none transition-colors"
+                    className="whitespace-nowrap text-[0.9375rem] leading-none transition-colors"
                     style={LABEL[st]}
                   >
                     {name}
                   </div>
                   <div
-                    className="whitespace-nowrap text-[10px] font-bold leading-none tracking-[0.15em]"
+                    className="whitespace-nowrap text-[0.625rem] font-bold leading-none tracking-[0.15em]"
                     style={{ color: KICKER_COLOR[st] }}
                   >
                     STEP {String(n).padStart(2, '0')}
@@ -134,7 +137,7 @@ export default function StepBar({
               {/* 连接线（属于左侧节点，随其状态着色/流动） */}
               {i < STEPS.length - 1 && (
                 <div
-                  className="relative mt-[19px] h-[2px] flex-1 overflow-hidden rounded-[2px]"
+                  className="relative mt-[1.1875rem] h-[0.125rem] flex-1 overflow-hidden rounded-[2px]"
                   style={{ background: st === 'done' ? 'transparent' : '#161f1c' }}
                 >
                   {FILL[st] && (

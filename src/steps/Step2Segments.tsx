@@ -1,12 +1,12 @@
 import OutdatedBadge from '@/components/OutdatedBadge'
 import SegmentConfirmModal from './SegmentConfirmModal'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Loader2, Plus, Trash2, X } from 'lucide-react'
 import type { Project, Segment, Shot } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
 import DurationStepper from '@/components/DurationStepper'
-import { no2 } from '@/utils/project'
+import { no2, shotOutdatedReasons } from '@/utils/project'
 import {
   ActionBar,
   Button,
@@ -90,9 +90,10 @@ export default function Step2Segments({ project }: { project: Project }) {
           skeletons={3}
         />
         <ActionBar>
-          <Button variant="primary" size="lg" disabled>
+          <button disabled aria-busy="true" style={CTA_GRADIENT} className="inline-flex h-10 cursor-wait items-center justify-center gap-2 rounded-full px-6 text-sm font-medium text-black">
+            <Loader2 size="0.875rem" className="animate-spin" />
             正在拆解剧本…
-          </Button>
+          </button>
         </ActionBar>
       </>
     )
@@ -107,7 +108,7 @@ export default function Step2Segments({ project }: { project: Project }) {
           <>
             <PillOutline disabled={assetStatus !== 'none'} title={assetStatus !== 'none' ? '已开始提取角色与场景，不能重新拆解，可以直接修改段落' : undefined} onClick={() => setRedoOpen(true)}>重新拆解</PillOutline>
             <PillPrimary onClick={() => setAddOpen(true)}>
-              <Plus size={14} strokeWidth={2.5} /> 新增剧本段落
+              <Plus size="0.875rem" strokeWidth={2.5} /> 新增剧本段落
             </PillPrimary>
           </>
         }
@@ -127,7 +128,7 @@ export default function Step2Segments({ project }: { project: Project }) {
           />
         ))}
         {segs.length === 0 && (
-          <div className="rounded-lg border border-white/10 bg-[#111213] py-16 text-center text-[13px] text-faint">
+          <div className="rounded-lg border border-white/10 bg-[#111213] py-16 text-center text-[0.8125rem] text-faint">
             暂无剧本段落
           </div>
         )}
@@ -209,7 +210,10 @@ function BottomBar({
   if (assetStatus === 'generating') {
     return (
       <ActionBar>
-        <PillPrimary disabled>正在提取角色与场景…</PillPrimary>
+        <button disabled aria-busy="true" style={CTA_GRADIENT} className="inline-flex h-10 cursor-wait items-center justify-center gap-2 rounded-full px-6 text-sm font-medium text-black">
+          <Loader2 size="0.875rem" className="animate-spin" />
+          正在提取角色与场景…
+        </button>
       </ActionBar>
     )
   }
@@ -227,7 +231,7 @@ function BottomBar({
   return (
     <ActionBar left="提取后可为角色和场景补全参考图，保持画面一致">
       <PillPrimary disabled={disabled} onClick={onExtract}>
-        <span className="text-[15px] leading-none">✦</span>
+        <span className="text-[0.9375rem] leading-none">✦</span>
         {COST.assetExtract} 下一步：提取角色与场景
       </PillPrimary>
     </ActionBar>
@@ -256,7 +260,8 @@ function ParagraphCard({
   const [open, setOpen] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const bodyRef = useRef<HTMLParagraphElement>(null)
-  const pending = !!shot?.outdated?.length
+  const pendingReasons = shotOutdatedReasons(shot)
+  const pending = !!pendingReasons.length
 
   // 检测原文是否超过收起高度，决定是否显示底部渐隐提示
   useLayoutEffect(() => {
@@ -288,7 +293,7 @@ function ParagraphCard({
             {seg.title}
           </button>
         )}
-        {shot && pending && <OutdatedBadge label={`镜头 ${no2(shot.no)} 待更新`} title={shot.outdated?.map(r => r.text).join('\n')} />}
+        {shot && pending && <OutdatedBadge label={`镜头 ${no2(shot.no)} 待更新`} title={pendingReasons.map(r => r.text).join('\n')} />}
         <div className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <DurationStepper value={seg.dur!} variant="inline" size="sm" title={`段落 ${no2(seg.no)} 时长`}
             disabled={durationDisabled} disabledTooltip=""
@@ -301,7 +306,7 @@ function ParagraphCard({
           onClick={onDelete}
           className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white/40"
         >
-          <Trash2 size={14} />
+          <Trash2 size="0.875rem" />
         </button>
       </div>
 
@@ -346,29 +351,29 @@ function AddSegModal({
   const [dur, setDur] = useState(15)
   const ok = title.trim() && text.trim()
   const boxCls =
-    'w-full resize-none rounded-lg border border-transparent bg-black/40 px-3 py-2.5 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
+    'w-full resize-none rounded-lg border border-transparent bg-black/40 px-3 py-2.5 text-[0.875rem] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
   return (
     <Overlay onClose={onClose}>
-      <div className="flex max-h-[86vh] w-[520px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+      <div className="flex max-h-[86vh] w-[32.5rem] max-w-[92vw] flex-col overflow-hidden dialog-surface rounded-2xl border">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">新增剧本段落</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
         {/* 内容 */}
         <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
           <div className="flex flex-col gap-2">
-            <div className="text-[14px] text-white/60">段落编号（自动）</div>
-            <div className="w-fit rounded-md bg-black/40 px-3 py-1.5 text-[15px] tabular-nums text-white">
+            <div className="text-[0.875rem] text-white/60">段落编号（自动）</div>
+            <div className="w-fit rounded-md bg-black/40 px-3 py-1.5 text-[0.9375rem] tabular-nums text-white">
               {no2(nextNo)}
             </div>
           </div>
           <div className="flex flex-col gap-2">
             <DurationStepper title="新增段落时长" value={dur} onChange={setDur} debounceMs={0} />
-            <div className="text-[14px] text-white/60">段落标题</div>
+            <div className="text-[0.875rem] text-white/60">段落标题</div>
             <input
               placeholder="例如：苏可推门对峙"
               value={title}
@@ -377,7 +382,7 @@ function AddSegModal({
             />
           </div>
           <div className="flex flex-col gap-2">
-            <div className="text-[14px] text-white/60">剧本原文</div>
+            <div className="text-[0.875rem] text-white/60">剧本原文</div>
             <textarea
               rows={5}
               placeholder="填入该段剧本原文，用于后续提取角色与生成镜头"
@@ -425,7 +430,7 @@ function SegmentTextEditor({ seg, shot, onSave, onClose }: { seg: Segment; shot?
   return <>
     <div className="fixed inset-0 z-20" onMouseDown={close} />
     <div className="absolute -inset-x-1 -top-1 z-30 rounded-lg border border-white/15 bg-[#16181a]/95 px-4 py-3 shadow-xl shadow-black/50 backdrop-blur">
-      <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => setText(e.target.value)} className="max-h-[360px] min-h-24 w-full resize-none bg-transparent text-[13px] leading-relaxed text-white/90 outline-none" />
+      <textarea ref={ref} autoFocus aria-label="段落原文" value={text} onChange={(e) => setText(e.target.value)} className="max-h-[22.5rem] min-h-24 w-full resize-none bg-transparent text-[0.8125rem] leading-relaxed text-white/90 outline-none" />
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-2 text-xs">
         <span className="shrink-0 text-white/40">收起时自动保存</span>
         <button onClick={close} className="text-white/60 hover:text-white">收起</button>

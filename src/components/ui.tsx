@@ -1,5 +1,6 @@
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Lock, User, X } from 'lucide-react'
+import { getUiScale } from '@/utils/layout'
 
 /* ---------- 图标 ---------- */
 export const Diamond = ({ className = '' }: { className?: string }) => (
@@ -10,7 +11,7 @@ export function Spinner({ size = 16 }: { size?: number }) {
   return (
     <span
       className="inline-block rounded-full border-2 border-brand/30 border-t-brand animate-spin"
-      style={{ width: size, height: size }}
+      style={{ width: `${size / 16}rem`, height: `${size / 16}rem` }}
     />
   )
 }
@@ -27,7 +28,7 @@ export function Overlay({ onClose, children }: { onClose?: () => void; children:
   }, [onClose])
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 animate-fadeUp"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px] animate-fadeUp"
       onMouseDown={onClose}
     >
       <div onMouseDown={(e) => e.stopPropagation()}>{children}</div>
@@ -51,15 +52,15 @@ export function Modal({
 }) {
   return (
     <Overlay onClose={onClose}>
-      <div className="rounded-xl border border-line bg-panel shadow-2xl" style={{ width }}>
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <div className="text-[15px] font-semibold">{title}</div>
+      <div className="dialog-surface rounded-2xl border" style={{ width: `${width / 16}rem`, maxWidth: 'calc(100vw - 32px)' }}>
+        <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+          <div className="text-[0.9375rem] font-semibold">{title}</div>
           <button className="text-muted hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={16} />
+            <X size="1rem" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 px-5 pb-4">{footer}</div>}
+        <div className="px-5 py-5">{children}</div>
+        {footer && <div className="flex items-center justify-end gap-2 rounded-b-2xl border-t border-white/[0.06] bg-black/10 px-5 py-4">{footer}</div>}
       </div>
     </Overlay>
   )
@@ -69,11 +70,11 @@ export function Modal({
 export function SaveBadge({ status }: { status: 'idle' | 'saving' | 'saved' }) {
   if (status === 'saving')
     return (
-      <span className="inline-flex items-center gap-1 text-[12px] text-muted">
-        <Loader2 size={12} className="animate-spin" /> 正在保存…
+      <span className="inline-flex items-center gap-1 text-[0.75rem] text-muted">
+        <Loader2 size="0.75rem" className="animate-spin" /> 正在保存…
       </span>
     )
-  if (status === 'saved') return <span className="text-[12px] text-brand">已保存</span>
+  if (status === 'saved') return <span className="text-[0.75rem] text-brand">已保存</span>
   return null
 }
 
@@ -100,14 +101,14 @@ export function Drawer({
     <div className="fixed inset-0 z-40 flex justify-end bg-black/50 animate-fadeUp" onMouseDown={onClose}>
       <div
         className="flex h-full max-w-[92vw] flex-col border-l border-line bg-panel shadow-2xl animate-slideInRight"
-        style={{ width }}
+        style={{ width: `${width / 16}rem` }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-[1] flex items-center gap-3 border-b border-line bg-panel px-5 py-3.5">
-          <div className="text-[15px] font-semibold">{title}</div>
+          <div className="text-[0.9375rem] font-semibold">{title}</div>
           {status && <SaveBadge status={status} />}
           <button className="ml-auto text-muted hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={16} />
+            <X size="1rem" />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
@@ -130,9 +131,9 @@ export function Button({ children, onClick, variant = 'ghost', disabled, size = 
     'inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
   const sz =
     size === 'sm'
-      ? 'px-2.5 py-1 text-[13px]'
+      ? 'px-2.5 py-1 text-[0.8125rem]'
       : size === 'lg'
-        ? 'px-5 py-2.5 text-[15px]'
+        ? 'px-5 py-2.5 text-[0.9375rem]'
         : 'px-3.5 py-1.5 text-sm'
   const styles: Record<string, string> = {
     primary: 'bg-brand text-black hover:bg-brand-dim',
@@ -151,7 +152,7 @@ export function Button({ children, onClick, variant = 'ghost', disabled, size = 
 /* ---------- 表单元素 ---------- */
 export function Label({ children, req }: { children: ReactNode; req?: boolean }) {
   return (
-    <div className="mb-1.5 text-[13px] text-muted">
+    <div className="mb-1.5 text-[0.8125rem] text-muted">
       {children}
       {req && <span className="ml-0.5 text-red-400">*</span>}
     </div>
@@ -187,7 +188,7 @@ export function FakeSelect({ value }: { value: string }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-2 text-sm">
       <span>{value}</span>
-      <ChevronDown size={14} className="text-faint" />
+      <ChevronDown size="0.875rem" className="text-faint" />
     </div>
   )
 }
@@ -229,16 +230,16 @@ export function ModelSelect({
   }
   const chevronMuted = variant === 'default' ? 'text-faint' : 'text-white/60'
   return (
-    <div ref={ref} className="relative" style={{ width }}>
+    <div ref={ref} className="relative" style={{ width: typeof width === 'number' ? `${width / 16}rem` : width }}>
       <button type="button" onClick={() => setOpen((o) => !o)} className={btnCls[variant]}>
         <span className="truncate">{value}</span>
         <ChevronDown
-          size={variant === 'default' ? 14 : 12}
+          size={variant === 'default' ? '0.875rem' : '0.75rem'}
           className={`ml-1 shrink-0 transition-transform ${chevronMuted} ${open ? 'rotate-180' : ''}`}
         />
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp">
+        <div className="floating-surface absolute right-0 z-10 mt-2 max-h-64 w-full space-y-0.5 overflow-auto rounded-xl border p-1.5 animate-fadeUp">
           {options.map((o) => (
             <button
               key={o}
@@ -250,12 +251,12 @@ export function ModelSelect({
                 onChange(o)
                 setOpen(false)
               }}
-              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] enabled:hover:bg-line disabled:opacity-40 disabled:cursor-not-allowed ${
-                o === value ? 'text-brand' : 'text-white/90'
+              className={`flex min-h-9 w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[0.8125rem] transition-colors enabled:hover:bg-white/[0.07] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand disabled:opacity-40 disabled:cursor-not-allowed ${
+                o === value ? 'bg-white/[0.05] text-brand' : 'text-white/90'
               }`}
             >
               <span className="truncate">{o}</span>
-              {o === value && <Check size={14} className="ml-2 shrink-0" />}
+              {o === value && <Check size="0.875rem" className="ml-2 shrink-0" />}
             </button>
           ))}
         </div>
@@ -276,19 +277,37 @@ export function Popover({
   onClose: () => void
   children: ReactNode
   width?: number
-  // default：紧凑文字菜单；glass：深色毛玻璃 + 图标行（对齐 Figma node 6:5555）
-  variant?: 'default' | 'glass'
+  // 共用悬浮表面；各变体只区分内部布局与留白。
+  variant?: 'default' | 'glass' | 'menu'
 }) {
-  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - width - 12))
+  const panel = useRef<HTMLDivElement>(null)
+  const [top, setTop] = useState(anchor.top)
+  const actualWidth = Math.min(width * getUiScale(), window.innerWidth - 16)
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - actualWidth - 8))
+  useLayoutEffect(() => {
+    const position = () => setTop(Math.max(8, Math.min(anchor.top, window.innerHeight - (panel.current?.offsetHeight ?? 0) - 8)))
+    position()
+    window.addEventListener('resize', position)
+    return () => window.removeEventListener('resize', position)
+  }, [anchor.top])
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [onClose])
   const panelCls =
-    variant === 'glass'
-      ? 'absolute flex flex-col gap-4 rounded-lg border border-white/10 bg-[#242628] p-[17px] shadow-2xl backdrop-blur-[10px] animate-fadeUp'
-      : 'absolute rounded-lg border border-line bg-panel py-1 shadow-2xl animate-fadeUp'
+    variant === 'menu'
+      ? 'floating-surface absolute space-y-1 rounded-2xl border p-2 animate-fadeUp'
+      : variant === 'glass'
+      ? 'floating-surface absolute flex flex-col gap-4 rounded-2xl border p-[1.0625rem] animate-fadeUp'
+      : 'floating-surface absolute rounded-xl border p-1.5 animate-fadeUp'
   return (
-    <div className="fixed inset-0 z-50" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50" onClick={e => e.stopPropagation()} onMouseDown={onClose}>
       <div
+        ref={panel}
         className={panelCls}
-        style={{ top: anchor.top, left, width }}
+        style={{ top, left, width: actualWidth, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {children}
@@ -298,6 +317,7 @@ export function Popover({
 }
 
 export function MenuItem({
+  icon,
   children,
   onClick,
   danger,
@@ -307,15 +327,17 @@ export function MenuItem({
   onClick?: () => void
   danger?: boolean
   disabled?: boolean
+  icon?: ReactNode
 }) {
   return (
     <button
       disabled={disabled}
       onClick={onClick}
-      className={`block w-full px-3.5 py-2 text-left text-[13px] hover:bg-line disabled:opacity-40 disabled:hover:bg-transparent ${
-        danger ? 'text-red-400' : 'text-white/90'
+      className={`floating-menu-item group flex min-h-12 w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[0.875rem] leading-5 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger ? 'text-red-400 enabled:hover:bg-red-500/10' : 'text-white/90 enabled:hover:bg-white/[0.07]'
       }`}
     >
+      {icon && <span aria-hidden="true" className="shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">{icon}</span>}
       {children}
     </button>
   )
@@ -367,10 +389,10 @@ export function PageHeader({
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
         <div className="flex items-center gap-2">
-          <h1 className="text-[20px] font-semibold">{title}</h1>
+          <h1 className="text-[1.25rem] font-semibold">{title}</h1>
           {badge}
         </div>
-        {desc && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">{desc}</p>}
+        {desc && <p className="mt-1 max-w-2xl text-[0.8125rem] leading-relaxed text-muted">{desc}</p>}
       </div>
       {right && <div className="flex shrink-0 items-center gap-2">{right}</div>}
     </div>
@@ -382,8 +404,8 @@ export function PageHeader({
 export function LockedBadge({ text = '该步骤已用于后续生成，仅供查看' }: { text?: string }) {
   return (
     <span className="group relative inline-flex">
-      <Lock size={14} className="cursor-help text-faint transition-colors group-hover:text-white/70" aria-label={text} />
-      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 w-max max-w-[360px] rounded-lg border border-line bg-panel px-3 py-2 text-[12px] font-normal leading-relaxed text-white/80 opacity-0 shadow-2xl transition-opacity group-hover:opacity-100">
+      <Lock size="0.875rem" className="cursor-help text-faint transition-colors group-hover:text-white/70" aria-label={text} />
+      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 w-max max-w-[22.5rem] rounded-lg border border-line bg-panel px-3 py-2 text-[0.75rem] font-normal leading-relaxed text-white/80 opacity-0 shadow-2xl transition-opacity group-hover:opacity-100">
         {text}
       </span>
     </span>
@@ -405,7 +427,7 @@ export function ActionBar({
     <div
       className={`${inline ? 'absolute' : 'fixed'} inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-line/60 bg-ink/95 px-8 py-3 backdrop-blur`}
     >
-      <div className="text-[13px] text-muted">{left}</div>
+      <div className="text-[0.8125rem] text-muted">{left}</div>
       <div className="flex items-center gap-3">{children}</div>
     </div>
   )
@@ -414,7 +436,7 @@ export function ActionBar({
 /* ---------- 星钻确认弹窗内部小行 ---------- */
 function Row({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="flex min-h-[32px] items-center justify-between gap-3">
+    <div className="flex min-h-[2rem] items-center justify-between gap-3">
       <span className="shrink-0 text-sm text-white/60">{label}</span>
       <span className="text-right text-sm text-white">{value}</span>
     </div>
@@ -427,8 +449,8 @@ const CONFIRM_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%,
 /* ---------- 锁定提示：确认弹窗里「这一步走完就回不来了」的一行小字 ---------- */
 export function LockNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-amber-300/90">
-      <Lock size={12} className="mt-[3px] shrink-0" />
+    <div className="mt-3 flex items-start gap-1.5 text-[0.75rem] leading-relaxed text-amber-300/90">
+      <Lock size="0.75rem" className="mt-[0.1875rem] shrink-0" />
       <span>{children}</span>
     </div>
   )
@@ -470,14 +492,14 @@ export function GenerateConfirmModal({
   return (
     <Overlay onClose={onClose}>
       <div
-        className="overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]"
-        style={{ width }}
+        className="dialog-surface overflow-hidden rounded-2xl border"
+        style={{ width: `${width / 16}rem`, maxWidth: 'calc(100vw - 32px)' }}
       >
         {/* 头部 */}
         <div className="flex h-16 items-center justify-between border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">{title}</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
@@ -549,7 +571,7 @@ export function GeneratingState({
   return (
     <div>
       <PageHeader title={title} desc={desc} />
-      <div className="mb-5 inline-flex items-center gap-2 rounded-lg bg-panel2 px-3.5 py-2 text-[13px] text-muted">
+      <div className="mb-5 inline-flex items-center gap-2 rounded-lg bg-panel2 px-3.5 py-2 text-[0.8125rem] text-muted">
         <Spinner size={13} />
         <span key={i} className="animate-fadeUp">
           {phases[i]}
@@ -569,7 +591,7 @@ export function ReadonlyField({ label, value }: { label: string; value?: string 
   if (!value || !value.trim()) return null
   return (
     <div className="mb-4">
-      <div className="mb-1 text-[13px] text-muted">{label}</div>
+      <div className="mb-1 text-[0.8125rem] text-muted">{label}</div>
       <div className="whitespace-pre-line text-sm leading-relaxed text-white/85">{value}</div>
     </div>
   )
@@ -580,9 +602,20 @@ export function RefPlaceholder({ kind, name }: { kind: 'char' | 'scene'; name?: 
   const Icon = kind === 'char' ? User : ImageIcon
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-1.5">
-      <Icon size={30} className="text-faint opacity-40" />
-      {name && <span className="mt-1 text-[17px] font-semibold text-white">{name}</span>}
-      <span className="text-[12px] text-faint">待生成参考图</span>
+      <Icon size="1.875rem" className="text-faint opacity-40" />
+      {name && <span className="mt-1 text-[1.0625rem] font-semibold text-white">{name}</span>}
+      <span className="text-[0.75rem] text-faint">待生成参考图</span>
     </div>
   )
+}
+
+
+/* 原生输入保留键盘和 label 行为，视觉由统一样式控制。 */
+export function Checkbox({ indeterminate = false, className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { indeterminate?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null)
+  useLayoutEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate }, [indeterminate])
+  return <input {...props} ref={ref} type="checkbox" aria-checked={indeterminate ? 'mixed' : props.checked} className={`choice-input choice-checkbox ${className}`} />
+}
+export function Radio({ className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  return <input {...props} type="radio" className={`choice-input choice-radio ${className}`} />
 }

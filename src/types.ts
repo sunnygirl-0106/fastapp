@@ -48,10 +48,15 @@ export interface VideoReferenceImage {
 }
 
 export interface VideoVersion {
+  model?: string // 生成时的视频模型；历史版本可能没有
+  resolution?: string // 生成参数快照；历史版本不回填当前设置
+  ratio?: string
+  audio?: boolean
+  cost?: number // 生成时的花费
   videoPrompt?: string // 生成时的提示词快照；历史版本可能没有
   referenceImages?: VideoReferenceImage[] // 生成时的参考图快照
   tag: string // v1
-  preferred: boolean
+  preferred: boolean // 当前版本
   url?: string
   dur: number // 生成时的镜头时长
   createdAt: number // 生成时间：成片页按此倒序，最新生成的排最前
@@ -80,7 +85,7 @@ export interface Shot {
   id: string
   no: number
   shot: string // 画面描述
-  timeline: string // 画面节奏（按顺序编号，每行一拍）
+  timeline: string // 时间安排（按顺序编号，每行一拍）
   action: string // 主要动作
   anchor: string // 场景位置
   motion: string // 动作说明
@@ -94,6 +99,7 @@ export interface Shot {
 }
 
 export interface Project {
+  lastVideoModel?: string // 本项目上次确认的视频模型
   id: string
   name: string
   no: number
@@ -117,7 +123,7 @@ export interface Project {
 // 分镜字段的中文标签与分组（编辑抽屉/快照复用）
 export const SHOT_FIELDS: { key: keyof Shot; label: string }[] = [
   { key: 'shot', label: '画面描述' },
-  { key: 'timeline', label: '画面节奏' },
+  { key: 'timeline', label: '时间安排' },
   { key: 'action', label: '主要动作' },
   { key: 'anchor', label: '场景位置' },
   { key: 'motion', label: '动作说明' },

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, X } from 'lucide-react'
+import { Checkbox } from '@/components/ui'
+import { useState } from 'react'
+import { AlertTriangle, Clock3, X } from 'lucide-react'
 import type { Project } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
 import { Diamond, ModelSelect, Overlay, fmt } from '@/components/ui'
@@ -7,32 +8,6 @@ import DurationStepper from '@/components/DurationStepper'
 
 // 浅青渐变主按钮（与首页 / 弹窗 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
-
-// 表头「全选」复选框（支持半选 indeterminate）
-function HeadCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-}: {
-  checked: boolean
-  indeterminate: boolean
-  onChange: () => void
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate
-  }, [indeterminate])
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={checked}
-      onChange={onChange}
-      onClick={(e) => e.stopPropagation()}
-      className="h-[18px] w-[18px] rounded accent-brand"
-    />
-  )
-}
 
 // Step3（进入镜头设计）与 Step4（重新生成镜头）共用
 export default function GenShotModal({
@@ -66,20 +41,31 @@ export default function GenShotModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="flex max-h-[88vh] w-[800px] max-w-[94vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+      <div className="flex max-h-[88vh] w-[50rem] max-w-[94vw] flex-col overflow-hidden dialog-surface rounded-2xl border">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">生成镜头设计</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
         {/* 主体 */}
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-6">
-          <div className="space-y-1 text-sm">
-            <div className="text-white">成片时长：{project.config.durMode === 'manual' ? `目标 ${project.config.targetDur} 秒 · 当前合计 ${total} 秒` : `自动，按内容确定 · 预计合计 ${total} 秒`}</div>
-            {sel.length > 0 && <p className="text-xs text-faint">可在下方逐段调整（4–30 秒），生成后也可以随时修改。</p>}
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[#c2f2ff]/15 bg-[#c2f2ff]/[0.04] px-4 py-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-white/90">
+                <Clock3 size="0.9375rem" className="text-[#c2f2ff]/70" />
+                成片时长
+                <span className="rounded-md bg-[#c2f2ff]/10 px-2 py-0.5 text-[0.6875rem] font-normal text-[#c2f2ff]">{project.config.durMode === 'manual' ? '指定时长' : '自动'}</span>
+              </div>
+              <p className="text-xs text-white/45">{project.config.durMode === 'manual' ? `目标时长 ${project.config.targetDur} 秒` : '根据剧本内容分配时长'}</p>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-white/45">{project.config.durMode === 'manual' ? '当前合计' : '预计合计'}</span>
+              <span className="text-2xl font-semibold tabular-nums tracking-tight text-[#c2f2ff]">{total}</span>
+              <span className="text-xs text-white/60">秒</span>
+            </div>
           </div>
           {/* 文本模型 */}
           <div className="space-y-2">
@@ -94,9 +80,9 @@ export default function GenShotModal({
             <div className="text-sm text-white/60">选择要生成镜头的段落（{segs.length}）</div>
             <div className="overflow-hidden rounded-lg border border-white/10 bg-[#111213]">
               {/* 表头 */}
-              <div className={`${cols} items-center border-b border-white/10 bg-white/[0.03] text-[13px] text-white/90`}>
+              <div className={`${cols} items-center border-b border-white/10 bg-white/[0.03] text-[0.8125rem] text-white/90`}>
                 <div className="flex h-12 items-center pl-4">
-                  <HeadCheckbox
+                  <Checkbox aria-label="全选"
                     checked={allSel}
                     indeterminate={someSel}
                     onChange={() => setSelection(allSel ? [] : segs.map((s) => s.no))}
@@ -107,7 +93,7 @@ export default function GenShotModal({
                 <div className="px-3">时长</div>
               </div>
               {/* 表体（可滚动） */}
-              <div className="max-h-[288px] overflow-y-auto">
+              <div className="max-h-[18rem] overflow-y-auto">
                 {segs.map((s) => {
                   const on = sel.includes(s.no)
                   const shot = project.shots.find((shot) => shot.segId === s.id)
@@ -116,26 +102,25 @@ export default function GenShotModal({
                       key={s.id}
                       className={`${cols} cursor-pointer items-center border-b border-white/10 transition-colors last:border-0 hover:bg-white/[0.02]`}
                     >
-                      <div className="flex h-[60px] items-center pl-4">
-                        <input
-                          type="checkbox"
+                      <div className="flex h-[3.75rem] items-center pl-4">
+                        <Checkbox
                           checked={on}
                           onChange={() => toggle(s.no)}
                           aria-label={`选择段落 ${String(s.no).padStart(2, '0')}`}
-                          className="h-[18px] w-[18px] rounded accent-brand"
+
                         />
                       </div>
-                      <div className="px-3 text-[13px] font-medium tabular-nums text-white/90">
+                      <div className="px-3 text-[0.8125rem] font-medium tabular-nums text-white/90">
                         {String(s.no).padStart(2, '0')}
                       </div>
                       <div className="min-w-0 px-3 py-3">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-[13px] text-white/90">{s.title}</span>
-                          {!!shot?.outdated?.length && <span className="inline-flex w-fit shrink-0 items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-300"><AlertTriangle size={11} />待更新</span>}
+                          <span className="truncate text-[0.8125rem] text-white/90">{s.title}</span>
+                          {!!shot?.outdated?.length && <span className="inline-flex w-fit shrink-0 items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-[0.6875rem] text-amber-300"><AlertTriangle size="0.6875rem" />待更新</span>}
                         </div>
-                        <div className="truncate text-[12px] text-white/50">{s.text}</div>
+                        <div className="truncate text-[0.75rem] text-white/50">{s.text}</div>
                       </div>
-                      <div className="flex cursor-default items-center self-stretch px-3 text-[13px] text-white/40"
+                      <div className="flex cursor-default items-center self-stretch px-3 text-[0.8125rem] text-white/40"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation() }}>
                         {on ? <DurationStepper value={durations.get(s.id)!} variant="inline" size="sm" debounceMs={0}
                           title={`段落 ${String(s.no).padStart(2, '0')} 时长`}
@@ -146,7 +131,7 @@ export default function GenShotModal({
                   )
                 })}
                 {segs.length === 0 && (
-                  <div className="px-4 py-10 text-center text-[13px] text-white/40">暂无剧本段落</div>
+                  <div className="px-4 py-10 text-center text-[0.8125rem] text-white/40">暂无剧本段落</div>
                 )}
               </div>
             </div>

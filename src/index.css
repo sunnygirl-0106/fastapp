@@ -4,6 +4,8 @@
 
 :root {
   color-scheme: dark;
+  /* One size larger: rem-based typography, controls and spacing scale together. */
+  font-size: 18px;
 }
 
 html,
@@ -18,6 +20,32 @@ body {
   color: #ededf0;
   font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Opaque elevated surfaces keep menu text clear above dense cards and tables. */
+.floating-surface {
+  background: linear-gradient(165deg, #303338 0%, #272a2e 45%, #232529 100%);
+  border-color: rgb(255 255 255 / .13);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .09),
+    0 0 0 1px rgb(0 0 0 / .3),
+    0 4px 10px rgb(0 0 0 / .3),
+    0 20px 48px -8px rgb(0 0 0 / .65);
+}
+
+.floating-menu-item:enabled:hover,
+.floating-menu-item:focus-visible {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .06), 0 1px 3px rgb(0 0 0 / .12);
+}
+
+.dialog-surface {
+  background: linear-gradient(155deg, #292c30 0%, #202226 45%, #1c1e21 100%);
+  border-color: rgb(255 255 255 / .12);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .08),
+    0 0 0 1px rgb(0 0 0 / .25),
+    0 8px 24px rgb(0 0 0 / .3),
+    0 32px 80px -12px rgb(0 0 0 / .7);
 }
 
 /* 滚动条 */
@@ -87,9 +115,9 @@ body {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 32px;
-  height: 32px;
-  margin: -16px 0 0 -16px;
+  width: 2rem;
+  height: 2rem;
+  margin: -1rem 0 0 -1rem;
   border-radius: 7px;
   border: 1px solid rgba(244, 253, 254, 0.5);
   box-shadow: 0 0 5px rgba(255, 255, 255, 0.18);
@@ -164,3 +192,81 @@ body {
     opacity: 0;
   }
 }
+
+/* Reserve the scrollbar gutter so hovering never changes line wrapping. */
+.shot-cell-preview {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  overscroll-behavior-y: contain;
+}
+.shot-cell-preview::-webkit-scrollbar { width: 6px; }
+.shot-cell-preview::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+.shot-cell-preview:hover,
+.shot-cell-preview:focus-within { scrollbar-color: #62666b transparent; }
+.shot-cell-preview:hover::-webkit-scrollbar-thumb,
+.shot-cell-preview:focus-within::-webkit-scrollbar-thumb { background: #62666b; }
+.shot-cell-preview::-webkit-scrollbar-thumb:hover { background: #93979c; }
+/* Remove the fade while reading so the last line and scrollbar stay visible. */
+.shot-cell-preview[data-overflow="true"]:not(:hover):not(:focus-within) {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 1.5lh), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 1.5lh), transparent 100%);
+}
+
+
+/* Unified choices retain native focus, keyboard and label activation. */
+.choice-input {
+  appearance: none;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 1px solid rgb(255 255 255 / .25);
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.choice-checkbox { border-radius: 5px; }
+.choice-radio { border-radius: 50%; }
+.choice-input:hover:not(:disabled) { border-color: rgb(255 255 255 / .45); }
+.choice-input:checked, .choice-input:indeterminate {
+  border-color: #02c5c8;
+  background-color: rgb(2 197 200 / .15);
+}
+.choice-input:checked:hover, .choice-input:indeterminate:hover { border-color: #02c5c8; }
+.choice-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 18 18'%3E%3Cpath d='m4 9 3.3 3.3L14 5.7' fill='none' stroke='%2302c5c8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.choice-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M4 8h8' stroke='%2302c5c8' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.choice-radio:checked { background-image: radial-gradient(circle, #02c5c8 0 4px, transparent 4px); }
+.choice-input:focus-visible { outline: 2px solid #02c5c8; outline-offset: 3px; }
+.choice-input:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Only Step 4's table rows reveal the inline ignore action. Hidden actions do
+   not receive focus; focusing any other control in the row reveals them. */
+.shot-table-row .shot-ignore { visibility: hidden; }
+.shot-table-row:hover .shot-ignore,
+.shot-table-row:focus-within .shot-ignore { visibility: visible; }
+/* Shared by the timeline cell, full-text editor and detail drawer. */
+.timeline-reflow { position: relative; min-height: 0; }
+.timeline-reflow-content { opacity: 1; transition: opacity 200ms ease; }
+.timeline-reflow[data-reflow-busy="true"] > .timeline-reflow-content { opacity: .35; transition-duration: 150ms; }
+.timeline-reflow-overlay {
+  position: absolute; inset: 0; z-index: 1; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  border-radius: inherit; background: rgb(17 18 19 / 40%); backdrop-filter: blur(1px);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 200ms ease, visibility 0s 200ms;
+}
+.timeline-reflow[data-reflow-busy="true"] > .timeline-reflow-overlay {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transition: opacity 150ms ease, visibility 0s;
+}
+.timeline-reflow-spinner { flex-shrink: 0; animation: timeline-reflow-spin .8s linear infinite; animation-play-state: paused; }
+.timeline-reflow[data-reflow-busy="true"] > .timeline-reflow-overlay > .timeline-reflow-spinner { animation-play-state: running; }
+.timeline-reflow-label { font-size: 12px; line-height: 16px; color: rgb(255 255 255 / 55%); white-space: nowrap; }
+@keyframes timeline-reflow-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .timeline-reflow-spinner { animation: none; } }

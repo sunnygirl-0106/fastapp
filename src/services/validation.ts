@@ -1,3 +1,4 @@
+import { beatText, normalizeBeats, writeBeat } from '@/utils/timeline'
 // TypeScript port of the companion panel's validation.py.
 export type Row = Record<string, any>
 export class ValidationError extends Error {
@@ -60,9 +61,10 @@ export function fixTotal(durations: number[], target: number): number[] {
   let diff = base - result.reduce((a, b) => a + b, 0)
   while (diff) {
     const step = diff > 0 ? unit : -unit
-    for (const i of result.map((_, i) => i).sort((a, b) => result[b] - result[a])) {
-      if (diff && result[i] + step >= min && result[i] + step <= 30) { result[i] += step; diff -= step }
-    }
+    const eligible = result.map((_, i) => i).filter(i => result[i] + step >= min && result[i] + step <= 30)
+    const under15 = step > 0 ? eligible.filter(i => result[i] < 15) : []
+    const i = (under15.length ? under15 : eligible).sort((a, b) => result[b] - result[a])[0]
+    result[i] += step; diff -= step
   }
   if (five && target % 5) {
     const remainder = target % 5
@@ -102,6 +104,8 @@ export function validateSegments(rows: Row[], script: string, mode: string, targ
   }
   if (rows[0].total_seconds !== total) notes.push(`meta.total_seconds 已改为段落合计 ${total}`)
   rows[0].total_seconds = total
+  const long = segments.filter(s => s.duration_seconds > 15).map(s => s.ordinal)
+  if (long.length) notes.push('以下段落超过 15 秒：' + long.join('、'))
   const odd = segments.filter(s => s.duration_seconds % 5).map(s => s.ordinal)
   if (odd.length > (mode === 'manual' && target! % 5 ? 1 : 0)) notes.push('以下段落时长不是 5 的倍数：' + odd.join('、'))
   const changed = restoreTexts(segments, cleanScript(script), preface ?? '')
@@ -162,7 +166,7 @@ export function styleNotes(row: Row, label: string): string[] {
     if (typeof text !== 'string') continue
     let [low, high] = LENGTH_RANGES[key]
     if (key === 'motion' && text.trim().replace(/。+$/, '') === '无位移') low = 0
-    const size = visibleLength(text)
+    const size = visibleLength(key === 'beat' ? beatText(text) : text)
     if (size < low || size > high) notes.push(`${label} ${name}：${size} 字，建议 ${low}–${high} 字`)
     const words = [...new Set(text.replace(QUOTED_TEXT, '').match(BANNED_PATTERN) ?? [])].sort()
     if (words.length) notes.push(`${label} ${name}：出现禁用词 ${words.join('、')}`)
@@ -173,10 +177,8 @@ export function deriveAssetIds(row: Row, idByName: Map<string, string>): string[
   const texts = [row.shot ?? '', ...(row.timeline ?? []), ...SHOT_TEXT_FIELDS.slice(1).map(f => row[f] ?? '')]
   return [...new Set(texts.filter(t => typeof t === 'string').flatMap(t => mentions(t, [...idByName.keys()]).found.map(n => idByName.get(n)!)))]
 }
-const TIME_PATTERN = /(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百半]+)\s*(?:秒|分钟|分半|毫秒|seconds?\b|secs?\b|s\b)|\d+(?:\.\d+)?\s*[-–—~～至到]\s*\d+(?:\.\d+)?|\d+:\d+/i
-export function timingInstructions(beat: string, sourceText: string) {
-  return beat.replace(/“([^”\n]+)”|"([^"\n]+)"|「([^」\n]+)」|『([^』\n]+)』/g, (match, a, b, c, d, offset) => /(?:[：:]|说|问|喊|道)\s*$/.test(beat.slice(0, offset)) && squash(sourceText).includes(squash(a ?? b ?? c ?? d)) ? '' : match)
-}
+export const BEAT_RANGES = [[6, 2, 2], [10, 2, 3], [30, 3, 4]] as const
+export const MAX_BEATS = 4
 export function validateShots(rows: Row[], segments: Row[], assets: Row[], targets: number[]) {
   const errors: string[] = [], notes: string[] = [], actual = new Map<number, number>()
   const idByName = new Map(assets.map(a => [a.name, a.asset_id]))
@@ -188,15 +190,19 @@ export function validateShots(rows: Row[], segments: Row[], assets: Row[], targe
     else { actual.set(r.segment_ordinal, (actual.get(r.segment_ordinal) ?? 0) + 1); label = `镜头（段 ${r.segment_ordinal}）` }
     textFields(r, [...SHOT_TEXT_FIELDS], label, errors)
     notes.push(...styleNotes(r, label))
-    if (!Array.isArray(r.timeline) || r.timeline.length < 2 || r.timeline.length > 8) errors.push(`${label}：timeline 必须有 2–8 拍`)
+    if (!Array.isArray(r.timeline) || r.timeline.length < 2 || r.timeline.length > MAX_BEATS) errors.push(`${label}：timeline 必须有 2–${MAX_BEATS} 拍`)
     else if (seg) {
-      const [, low, high] = [[6,2,2],[10,2,3],[15,3,4],[20,4,5],[30,5,7]].find(([limit]) => seg.duration_seconds <= limit) ?? [30,5,7]
+      const [, low, high] = BEAT_RANGES.find(([limit]) => seg.duration_seconds <= limit) ?? BEAT_RANGES[BEAT_RANGES.length - 1]
       if (r.timeline.length < low || r.timeline.length > high) notes.push(`${label}：${seg.duration_seconds} 秒建议 ${low}–${high} 拍，实际 ${r.timeline.length} 拍`)
     }
     if (Array.isArray(r.timeline)) r.timeline.forEach((beat: unknown, j: number) => {
       if (typeof beat !== 'string' || !beat.trim()) errors.push(`${label} 第 ${j + 1} 拍：必须为非空字符串`)
-      else if (TIME_PATTERN.test(timingInstructions(beat, seg?.text ?? ''))) errors.push(`${label} 第 ${j + 1} 拍：节拍不得包含时长指令或时间槽（原文引用对白除外）`)
     })
+    if (seg && Array.isArray(r.timeline) && r.timeline.every((b: unknown) => typeof b === 'string' && b.trim())) {
+      const fixed = normalizeBeats(r.timeline, seg.duration_seconds).map(writeBeat)
+      if (JSON.stringify(fixed) !== JSON.stringify(r.timeline)) notes.push(`${label}：时间安排时间段已修正为连续整数秒，与本段时长一致`)
+      r.timeline = fixed
+    }
     if (SHOT_TEXT_FIELDS.some(f => typeof r[f] !== 'string') || !Array.isArray(r.timeline)) return
     const inShot = mentions(r.shot, [...idByName.keys()])
     const others = [...SHOT_TEXT_FIELDS.slice(1).map(f => r[f]), ...r.timeline.filter((b: unknown) => typeof b === 'string')].map(t => mentions(t, [...idByName.keys()]))

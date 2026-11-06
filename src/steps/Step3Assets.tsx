@@ -1,7 +1,8 @@
+import { Checkbox } from '@/components/ui'
 import { createPortal } from 'react-dom'
 import { renameOccurrences, shotsReferencingAsset, shotGenerationBlocked } from '@/utils/project'
 import { useRef, useState, type ReactNode } from 'react'
-import { Eraser, Image, MoreVertical, Plus, Pencil, Sparkles, Trash2, X } from 'lucide-react'
+import { Eraser, Image, Loader2, MoreVertical, Plus, Pencil, Sparkles, Trash2, X } from 'lucide-react'
 import type { Asset, Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST, MODELS, MODEL_OPTIONS } from '@/services/generation'
@@ -12,6 +13,7 @@ import {
   GeneratingState,
   Modal,
   ModelSelect,
+  MenuItem,
   Overlay,
   PageHeader,
   Popover,
@@ -82,9 +84,10 @@ export default function Step3Assets({ project }: { project: Project }) {
           phases={['正在识别主要角色…', '正在整理人物设定…', '正在提取剧本场景…']}
         />
         <ActionBar>
-          <Button variant="primary" size="lg" disabled>
+          <button disabled aria-busy="true" style={CTA_GRADIENT} className="inline-flex h-10 cursor-wait items-center justify-center gap-2 rounded-full px-6 text-sm font-medium text-black">
+            <Loader2 size="0.875rem" className="animate-spin" />
             正在提取角色与场景…
-          </Button>
+          </button>
         </ActionBar>
       </>
     )
@@ -92,7 +95,7 @@ export default function Step3Assets({ project }: { project: Project }) {
 
   const renderCards = (list: Asset[], emptyText: string) =>
     list.length === 0 ? (
-      <div className="col-span-full py-8 text-[13px] text-faint">{emptyText}</div>
+      <div className="col-span-full py-8 text-[0.8125rem] text-faint">{emptyText}</div>
     ) : (
       list.map((a) => (
         <AssetCard
@@ -210,26 +213,27 @@ export default function Step3Assets({ project }: { project: Project }) {
       )}
 
       {menu && (
-        <Popover anchor={menu} width={168} variant="glass" onClose={() => setMenu(null)}>
-          <MenuRow icon={<Image size={16} />} onClick={() => { uploadId.current = menu.a.id; uploadRef.current?.click(); setMenu(null) }}>
+        <Popover anchor={menu} width={224} variant="menu" onClose={() => setMenu(null)}>
+          <MenuItem icon={<Image size="1rem" />} onClick={() => { uploadId.current = menu.a.id; uploadRef.current?.click(); setMenu(null) }}>
             选择本地图片
-          </MenuRow>
-          <MenuRow icon={<Sparkles size={16} />} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
+          </MenuItem>
+          <MenuItem icon={<Sparkles size="1rem" />} onClick={() => { setGenFor(menu.a); setMenu(null) }}>
             {menu.a.imgState === 'done' ? 'AI 重新生成图片' : 'AI 生成图片'}
-          </MenuRow>
-          <MenuRow icon={<Pencil size={16} />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
-            编辑{menu.a.kind === 'char' ? '角色' : '场景'}设定
-          </MenuRow>
-          <MenuRow
-            icon={<Eraser size={16} />}
+          </MenuItem>
+          <MenuItem icon={<Pencil size="1rem" />} onClick={() => { setEditFor(menu.a.id); setMenu(null) }}>
+            编辑提示词
+          </MenuItem>
+          <MenuItem
+            icon={<Eraser size="1rem" />}
             disabled={menu.a.imgState !== 'done'}
             onClick={() => { clearAssetImage(menu.a.id); setMenu(null) }}
           >
             清除参考图
-          </MenuRow>
-          <MenuRow icon={<Trash2 size={16} />} onClick={() => { setDeleteFor(menu.a); setMenu(null) }}>
+          </MenuItem>
+          <div className="my-1.5 border-t border-white/[0.08]" />
+          <MenuItem danger icon={<Trash2 size="1rem" />} onClick={() => { setDeleteFor(menu.a); setMenu(null) }}>
             删除{menu.a.kind === 'char' ? '角色' : '场景'}
-          </MenuRow>
+          </MenuItem>
         </Popover>
       )}
     </div>
@@ -242,34 +246,10 @@ export default function Step3Assets({ project }: { project: Project }) {
   }
 }
 
-/* 玻璃菜单行：16px 图标 + 14px 文案（对齐 Figma node 6:3206） */
-function MenuRow({
-  icon,
-  children,
-  onClick,
-  disabled,
-}: {
-  icon: ReactNode
-  children: ReactNode
-  onClick?: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      className="flex items-center gap-2 text-[14px] text-white/90 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      <span className="shrink-0 text-white/80">{icon}</span>
-      {children}
-    </button>
-  )
-}
-
 function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <div className="mb-8">
-      <div className="mb-3 text-[15px] font-semibold">
+      <div className="mb-3 text-[0.9375rem] font-semibold">
         {title}
         <span className="ml-1 text-muted">（{count}）</span>
       </div>
@@ -280,8 +260,8 @@ function Section({ title, count, children }: { title: string; count: number; chi
 
 function AddAssetCard({ kind, onClick }: { kind: Asset['kind']; onClick: () => void }) {
   return <button onClick={onClick} className="relative flex flex-col rounded-lg border border-dashed border-white/20 bg-panel text-sm text-white/60 transition-colors hover:border-brand/50 hover:text-brand">
-    <span aria-hidden className="aspect-square w-full" /><span aria-hidden className="h-[66px]" />
-    <span className="absolute inset-0 flex flex-col items-center justify-center gap-3"><Plus size={28} />新增{kind === 'char' ? '角色' : '场景'}</span>
+    <span aria-hidden className="aspect-square w-full" /><span aria-hidden className="h-[4.125rem]" />
+    <span className="absolute inset-0 flex flex-col items-center justify-center gap-3"><Plus size="1.75rem" />新增{kind === 'char' ? '角色' : '场景'}</span>
   </button>
 }
 
@@ -333,8 +313,8 @@ function AssetCard({
       {/* 名称条：名字在下方，右侧竖向「⋮」更多操作（无 hover 操作） */}
       <div className="flex items-center justify-between gap-2 px-4 py-3.5">
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-medium leading-tight text-white">{a.name}</div>
-          <div className="mt-1.5 truncate text-[12px] leading-none text-white/40">{subtitle}</div>
+          <div className="truncate text-[0.9375rem] font-medium leading-tight text-white">{a.name}</div>
+          <div className="mt-1.5 truncate text-[0.75rem] leading-none text-white/40">{subtitle}</div>
         </div>
         {!generating && (
           <button
@@ -346,7 +326,7 @@ function AssetCard({
               onMenu(e)
             }}
           >
-            <MoreVertical size={18} />
+            <MoreVertical size="1.125rem" />
           </button>
         )}
       </div>
@@ -394,12 +374,12 @@ function GenAssetImageModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="flex max-h-[86vh] w-[660px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+      <div className="flex max-h-[86vh] w-[41.25rem] max-w-[92vw] flex-col overflow-hidden dialog-surface rounded-2xl border">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">AI 生成{kindCn}（{a.name}）</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
@@ -412,17 +392,17 @@ function GenAssetImageModal({
             onChange={(e) => setPrompt(e.target.value)}
             aria-label="生图提示词"
             placeholder={`描述「${a.name}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
-            className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
+            className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[0.875rem] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40"
           />
 
           <div className="flex flex-wrap items-center gap-4">
             <ModelSelect value={model} options={MODEL_OPTIONS.image} onChange={setModel} variant="pill" width={148} />
             <div className="flex items-center gap-3">
-              <span className="text-[14px] text-white">画面比例</span>
+              <span className="text-[0.875rem] text-white">画面比例</span>
               <ModelSelect value={ratio} options={['1:1', '9:16', '16:9', '4:3', '3:4']} onChange={setRatio} variant="pill" width={84} />
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-[14px] text-white">分辨率</span>
+              <span className="text-[0.875rem] text-white">分辨率</span>
               <ResChips value={res} onChange={setRes} />
             </div>
           </div>
@@ -430,7 +410,7 @@ function GenAssetImageModal({
 
         {/* 底部 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-4 px-5 pb-5">
-          <div className="text-[14px] text-white/60">
+          <div className="text-[0.875rem] text-white/60">
             合计预计消耗 <span className="text-brand">{fmt(cost)}</span> 星钻（1 张）· 余额 {fmt(balance)}
           </div>
           <PillCTA disabled={!ok} onClick={() => onConfirm({ prompt })}>
@@ -482,7 +462,7 @@ function BatchModal({
   const renderGroup = (title: string, list: Asset[], kindCn: string, divider: boolean) =>
     list.length === 0 ? null : (
       <div className={divider ? 'border-b border-white/5 pb-6' : ''}>
-        <div className="mb-3 text-[16px] font-medium text-white">
+        <div className="mb-3 text-[1rem] font-medium text-white">
           {title}
           <span className="text-[#525252]">（{list.length}）</span>
         </div>
@@ -492,14 +472,13 @@ function BatchModal({
             return (
               <div key={a.id} className="flex flex-col gap-3">
                 <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={on}
                     onChange={() => toggle(a.id)}
-                    className="h-[18px] w-[18px] rounded accent-brand"
+
                   />
-                  <span className="text-[14px] font-semibold text-white">{a.name}</span>
-                  <span className="rounded-full bg-black/60 px-3 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-[6px]">
+                  <span className="text-[0.875rem] font-semibold text-white">{a.name}</span>
+                  <span className="rounded-full bg-black/60 px-3 py-0.5 text-[0.6875rem] font-medium text-white/90 backdrop-blur-[6px]">
                     {kindCn}
                   </span>
                 </label>
@@ -509,7 +488,7 @@ function BatchModal({
                   onChange={(e) => setPrompts((p) => ({ ...p, [a.id]: e.target.value }))}
                   aria-label={`生图提示词 · ${a.name}`}
                   placeholder={`描述「${a.name}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
-                  className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
+                  className="w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[0.875rem] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-brand/40"
                 />
               </div>
             )
@@ -520,12 +499,12 @@ function BatchModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="flex max-h-[86vh] w-[640px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+      <div className="flex max-h-[86vh] w-[40rem] max-w-[92vw] flex-col overflow-hidden dialog-surface rounded-2xl border">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
           <div className="text-base font-medium text-white">一键补全参考图</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
@@ -537,13 +516,13 @@ function BatchModal({
 
         {/* 全选提示 */}
         <label className="flex shrink-0 cursor-pointer items-center gap-2 px-5 pt-2">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={allOn}
+            indeterminate={sel.length > 0 && !allOn}
             onChange={toggleAll}
-            className="h-[18px] w-[18px] rounded accent-brand"
+
           />
-          <span className="text-[12px] text-white/60">
+          <span className="text-[0.75rem] text-white/60">
             已选择 {sel.length}/{assets.length} 个，可取消个别参考图
           </span>
         </label>
@@ -563,7 +542,7 @@ function BatchModal({
 
         {/* 底部：消耗 + 确认 */}
         <div className="flex h-16 shrink-0 items-center justify-end gap-4 px-5 pb-5">
-          <div className="flex items-center gap-1 text-[14px] text-[#999]">
+          <div className="flex items-center gap-1 text-[0.875rem] text-[#999]">
             <Diamond />
             合计预计消耗<span className="text-brand">{fmt(cost)}星钻</span>（{sel.length}张）
           </div>
@@ -604,16 +583,16 @@ function EditableAssetSettingModal({
   const [prompt, setPrompt] = useState(a.prompt)
 
   const boxCls =
-    'w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[14px] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
+    'w-full resize-none rounded-lg border border-transparent bg-black/40 p-3 text-[0.875rem] leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-brand/40'
 
   return (
     <Overlay onClose={syncOpen ? () => setSyncOpen(false) : onClose}>
-      <div className="flex max-h-[86vh] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-white/5 bg-[#1c1e20] shadow-[0_16px_64px_rgba(0,0,0,0.4)] backdrop-blur-[10px]">
+      <div className="flex max-h-[86vh] w-[35rem] max-w-[92vw] flex-col overflow-hidden dialog-surface rounded-2xl border">
         {/* 头部 */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-5">
-          <div className="text-base font-medium text-white">{isNew ? `新增${kindCn}` : `编辑${kindCn}设定`}</div>
+          <div className="text-base font-medium text-white">{isNew ? `新增${kindCn}` : '编辑提示词'}</div>
           <button className="text-white/50 transition-colors hover:text-white" onClick={onClose} aria-label="关闭">
-            <X size={14} />
+            <X size="0.875rem" />
           </button>
         </div>
 
@@ -621,7 +600,7 @@ function EditableAssetSettingModal({
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-6">
           {/* 名称与跨类型重名校验 */}
           <div className="flex flex-col gap-2">
-            <div className="text-[14px] text-white/60">{kindCn}名称</div>
+            <div className="text-[0.875rem] text-white/60">{kindCn}名称</div>
             <input aria-label={`${kindCn}名称`} className={boxCls} value={name} onChange={(e) => { setName(e.target.value); setNameTouched(true) }} />
             {duplicate && <p className="text-xs text-red-400">名称已被其他角色或场景使用</p>}
             {nameTouched && !name.trim() && <p className="text-xs text-red-400">名称不能为空</p>}
@@ -629,7 +608,7 @@ function EditableAssetSettingModal({
 
           {/* 生图提示词 */}
           <div className="flex flex-col gap-3">
-            <div className="text-[14px] text-white/60">生图提示词</div>
+            <div className="text-[0.875rem] text-white/60">生图提示词</div>
             <textarea
               rows={6}
               value={prompt}
@@ -638,7 +617,7 @@ function EditableAssetSettingModal({
               placeholder={`描述「${name.trim() || kindCn}」的外观，用于生成参考图和镜头设计；版式和风格会自动添加`}
               className={boxCls}
             />
-            <div className="text-[14px] text-white/40">用于生成参考图和镜头设计</div>
+            <div className="text-[0.875rem] text-white/40">用于生成参考图和镜头设计</div>
           </div>
         </div>
 
@@ -668,10 +647,10 @@ function SyncRenameModal({ oldName, newName, occurrences, onClose, onSave }: {
   oldName: string; newName: string; occurrences: ReturnType<typeof renameOccurrences>; onClose: () => void; onSave: (sync: boolean) => void
 }) {
   return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onMouseDown={(e) => { e.stopPropagation(); onClose() }}>
-    <div className="w-[640px] max-w-[92vw] rounded-xl border border-white/5 bg-[#1c1e20] p-5 shadow-2xl backdrop-blur" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between"><h2 className="text-base font-medium">同步替换段落和镜头文本？</h2><button aria-label="返回编辑" onClick={onClose}><X size={14} /></button></div>
+    <div className="w-[40rem] max-w-[92vw] dialog-surface rounded-2xl border p-5" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between"><h2 className="text-base font-medium">同步替换段落和镜头文本？</h2><button aria-label="返回编辑" onClick={onClose}><X size="0.875rem" /></button></div>
       <p className="my-3 text-sm text-white/60">检测到 {occurrences.length} 处文本包含旧名称「{oldName}」</p>
-      <div className="max-h-[360px] space-y-2 overflow-auto">{occurrences.map((hit, i) => <div key={i} className="rounded-lg bg-black/30 p-3"><div className="mb-2 text-xs text-faint">{hit.source}</div><p className="text-sm text-white/80">{hit.before}<span className="text-red-400 line-through">{oldName}</span><span className="text-brand">{newName}</span>{hit.after}</p></div>)}</div>
+      <div className="max-h-[22.5rem] space-y-2 overflow-auto">{occurrences.map((hit, i) => <div key={i} className="rounded-lg bg-black/30 p-3"><div className="mb-2 text-xs text-faint">{hit.source}</div><p className="text-sm text-white/80">{hit.before}<span className="text-red-400 line-through">{oldName}</span><span className="text-brand">{newName}</span>{hit.after}</p></div>)}</div>
       <div className="mt-5 flex justify-end gap-2"><PillOutline onClick={() => onSave(false)}>仅修改名称</PillOutline><PillCTA onClick={() => onSave(true)}>同步替换并保存</PillCTA></div>
     </div>
   </div>, document.body)

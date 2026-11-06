@@ -70,5 +70,32 @@ try {
   const retryInput=structuredClone(p());handler=()=>response(mock.mockShots(retryInput,[1]).text);await s().generateShots([1])
   check('失败后的临时状态已清理，下一次生成可正常清除待更新',()=>{assert.equal(p().shotStatus,'done');assert.deepEqual(p().shots[0].outdated,[])})
   check('校验失败保留原始文本及错误供排查',()=>assert.ok(validationFailures.some(args=>args[1]?.raw==='not json')))
+  reset()
+  const fiveBeatInput=structuredClone(p()),fiveBeatBalance=p().balance
+  handler=()=>response(jsonl([{...encodeShot(fiveBeatInput.shots[0],1),timeline:Array(5).fill('抬头')}]))
+  await s().generateShots([1])
+  check('v12 模型输出 5 拍仅重试一次，旧镜头保留且不扣费',()=>{
+    assert.equal(calls.length,2);assert.match(s().toast,/timeline 必须有 2–4 拍/)
+    assert.deepEqual(p().shots,fiveBeatInput.shots);assert.equal(p().balance,fiveBeatBalance)
+  })
+  const timing=await server.ssrLoadModule('/src/utils/timeline.ts')
+  for (const timeline of [
+    ['0–3秒：抬头','3–7秒：转身','7–10秒：离开'],
+    ['0-3.5秒：抬头','3.5-7秒：转身','7-10秒：离开'],
+    ['2–5秒：抬头','5–7秒：转身','7–10秒：离开'],
+    ['0–3秒：抬头','4–7秒：转身','7–12秒：离开'],
+    ['抬头','说：“一二三四五六七八九十”','离开'],
+  ]) {
+    reset();s().updateSegment('s1',{dur:10})
+    const row=encodeShot(p().shots[0],1)
+    handler=()=>response(jsonl([{...row,timeline}]))
+    await s().generateShots([1])
+    check('v13 时间段修正不重试：'+timeline[0],()=>{
+      assert.equal(calls.length,1);assert.equal(p().shotStatus,'done');assert.ok(!/失败/.test(s().toast))
+      const parsed=timing.timelineLines(p().shots[0].timeline).map(timing.readBeat)
+      assert.equal(parsed[0].start,0);assert.equal(parsed.at(-1).end,10)
+      parsed.forEach((b,i)=>{assert.ok(Number.isInteger(b.start)&&Number.isInteger(b.end)&&b.end>b.start);if(i)assert.equal(b.start,parsed[i-1].end)})
+    })
+  }
   console.log(`${checks} text runtime checks passed.`)
 } finally {globalThis.fetch=originalFetch;globalThis.setTimeout=originalTimeout;console.error=originalError;await server.close();dom.window.close()}
