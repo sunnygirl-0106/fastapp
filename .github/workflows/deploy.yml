@@ -25,6 +25,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: node scripts/check-demo-fixtures.mjs
       - run: npm run build
         env:
           PHANTHY_MOCK: '1'

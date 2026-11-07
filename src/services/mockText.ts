@@ -1,7 +1,8 @@
 import { normalizeTimeline, beatText } from '@/utils/timeline'
 import { cleanScript, mentions, fixTotal } from './validation'
 import type { Project, Segment, Shot } from '@/types'
-import { sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
+import { SAMPLE_SCRIPT, sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
+import { findDemoFixture, sameScript } from '@/data/demoFixtures'
 import { allocateSegmentDurations, splitSegmentText } from '@/utils/project'
 import { DUR_DEFAULT } from '@/data/duration'
 import { uid } from './generation'
@@ -9,19 +10,31 @@ import { encodeAssets, encodeSegments, encodeShot, jsonl, formatTimeline, timeli
 import { _SEGMENT_JSONL_SYSTEM_PROMPT, _ASSET_JSONL_SYSTEM_PROMPT, _SHOT_JSONL_SYSTEM_PROMPT, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from './prompts'
 
 // 请求保留与未来文本服务相同的 system/user 输入，响应严格使用 JSONL。
-// 演示仍使用原有样本内容和时长算法，不调用真实模型。
+// 匹配内置剧本时重放真实模型结果，其余输入只做基础分段，不调用真实模型。
 export function mockSegments(project: Project) {
   const request = { system: _SEGMENT_JSONL_SYSTEM_PROMPT, user: buildSegmentUserMessage(project) }
   const p = { ...project, segments: [] as Segment[] }
   const samples = sampleSegments()
   const target = p.config.targetDur ?? 60
+  const fixture = findDemoFixture(project.script)
+  if (fixture && (p.config.durMode !== 'manual' || (target >= fixture.segments.length * 4 && target <= fixture.segments.length * 30))) {
+    const segments = structuredClone(fixture.segments)
+    if (p.config.durMode === 'manual') {
+      const durations = fixTotal(segments.map(s => s.dur!), target)
+      segments.forEach((s, i) => { s.dur = durations[i] })
+    }
+    return { request, text: encodeSegments(segments, p.config.durMode ?? 'auto', target) }
+  }
   const n = p.config.durMode === 'manual' ? Math.max(Math.ceil(target / 15), Math.min(3, Math.floor(target / 4))) : 3
   const script = cleanScript(project.script)
   // Use contiguous slices of the actual script, so mock obeys the same coverage check.
   const sampleText = samples.map(s => s.text).join('')
-  const texts = script.replace(/\s/g, '') === sampleText.replace(/\s/g, '') && n === 3
-    ? samples.map(s => s.text) : splitSegmentText(script, n)
-  p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: samples[i]?.title ?? `剧本段落${i + 1}`, text }))
+  const isOriginal = sameScript(script, SAMPLE_SCRIPT) || sameScript(script, sampleText)
+  const originalTexts = sameScript(script, SAMPLE_SCRIPT)
+    ? script.split(/(?=动作：\n震动停止。|动作：\n苏可整个人原地弹起)/)
+    : samples.map(s => s.text)
+  const texts = isOriginal && n === 3 ? originalTexts : splitSegmentText(script, n).filter(t => t.trim())
+  p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: isOriginal && n === 3 ? samples[i].title : `剧本段落${i + 1}`, text }))
   const durations = allocateSegmentDurations(p, p.segments)
   const values = p.config.durMode === 'manual' ? p.segments.map(() => target / p.segments.length) : [...durations.values()]
   const fixed = fixTotal(values, p.config.durMode === 'manual' ? target : values.reduce((n, d) => n + Math.max(5, Math.round(d / 5) * 5), 0))
@@ -31,7 +44,10 @@ export function mockSegments(project: Project) {
 
 export function mockAssets(p: Project) {
   const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments, p.scriptPreface, p.config.shotStyle) }
-  const assets = sampleAssets().map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name)).map((seg) => seg.no) })).filter(a => a.belongSegs.length)
+  const fixture = findDemoFixture(p.script)
+  const original = sameScript(p.script, SAMPLE_SCRIPT) || sameScript(p.script, sampleSegments().map(s => s.text).join(''))
+  const source = fixture?.assets ?? (original ? sampleAssets() : [{ id: 'demo_scene', kind: 'scene' as const, name: '剧本场景', importance: 'major' as const, prompt: '根据当前剧本呈现环境：' + p.segments.map(s => s.text).join('\n'), imgState: 'none' as const }])
+  const assets = source.map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name) || fixture?.segments.some(s => sameScript(s.text, seg.text) && a.belongSegs?.includes(s.no))).map((seg) => seg.no) })).filter(a => a.belongSegs.length)
   return { request, text: encodeAssets(assets) }
 }
 
@@ -43,15 +59,20 @@ export function mockShots(p: Project, ordinals: number[]) {
 }
 
 function designShot(p: Project, seg: Segment, old?: Shot): Shot {
+  const fixture = findDemoFixture(p.script)
+  const recordedSegment = fixture?.segments.find(s => sameScript(s.text, seg.text))
+  const recorded = fixture?.shots.find(s => s.no === recordedSegment?.no && s.assetNames.every(name => p.assets.some(a => a.name === name)))
   const sample = sampleShots().find((s) => s.segId === seg.id)
   const originalText = sampleSegments().find((s) => s.id === seg.id)?.text
-  const base = old ?? (originalText === seg.text ? sample : undefined)
+  // Edited segment text must never reuse an obsolete recorded design.
+  const originalPart = cleanScript(SAMPLE_SCRIPT).split(/(?=动作：\n震动停止。|动作：\n苏可整个人原地弹起)/)[seg.no - 1]
+  const base = recorded ?? (originalText === seg.text || (originalPart && sameScript(originalPart, seg.text)) ? sample : undefined)
   const dur = seg.dur ?? DUR_DEFAULT
-  const refs = p.assets.filter((a) => old?.assetIds?.includes(a.id) || seg.text.includes(a.name) || a.belongSegs?.includes(seg.no))
+  const refs = p.assets.filter((a) => recorded ? recorded.assetNames.includes(a.name) : seg.text.includes(a.name) || a.belongSegs?.includes(seg.no))
   if (!refs.some(a => a.kind === 'scene')) { const scene = p.assets.find(a => a.kind === 'scene'); if (scene) refs.push(scene) }
   const scene = refs.find((a) => a.kind === 'scene')
   const shot: Shot = {
-    assetIds: [...new Set([...(old?.assetIds ?? []).filter((id) => p.assets.some((a) => a.id === id)), ...refs.map((a) => a.id)])],
+    assetIds: refs.map((a) => a.id),
     id: old?.id ?? uid('shot'), segId: seg.id, no: seg.no, dur,
     shot: base?.shot ?? seg.text,
     timeline: normalizeTimeline(formatTimeline((base ? timelineLines(base.timeline).map(beatText) : ['镜头建立人物与场景的位置关系。', '完成本段动作，保持前后衔接。']).reduce<string[]>((beats, beat, i) => { if (i < 4) beats.push(beat); else beats[3] += '；' + beat; return beats }, [])), dur),

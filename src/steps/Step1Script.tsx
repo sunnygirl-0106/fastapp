@@ -5,6 +5,7 @@ import type { Project } from '@/types'
 import { useStore } from '@/store/workflowStore'
 import { COST } from '@/services/generation'
 import { ActionBar, LockedBadge, PageHeader, Spinner } from '@/components/ui'
+import { demoFixtures } from '@/data/demoFixtures'
 
 // 浅青渐变主按钮（对齐 Figma node 6:2239，与其它步骤 CTA 一致）
 const CTA_GRADIENT = { backgroundImage: 'linear-gradient(180deg, #c2f2ff 0%, #cef4ff 100%)' }
@@ -91,6 +92,18 @@ export default function Step1Script({ project, locked }: { project: Project; loc
         onChange={onPickFile}
         className="hidden"
       />
+
+      {!__REAL_TEXT__ && !locked && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3">
+          <span className="mr-1 text-xs text-white/50">体验完整示例</span>
+          {demoFixtures.map(fixture => (
+            <button key={fixture.id} onClick={() => onChange(fixture.script)} className="rounded-lg border border-[#c2f2ff]/20 bg-[#c2f2ff]/[0.06] px-3 py-1.5 text-xs text-[#c2f2ff] transition-colors hover:bg-[#c2f2ff]/10">
+              载入《{fixture.name}》
+            </button>
+          ))}
+          <span className="basis-full text-xs leading-5 text-white/40">示例使用已保存的真实生成结果；其他剧本仅演示基础分段。</span>
+        </div>
+      )}
 
       <textarea
         value={text}
