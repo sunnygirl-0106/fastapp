@@ -6,6 +6,7 @@ import Step2Segments from '@/steps/Step2Segments'
 import Step3Assets from '@/steps/Step3Assets'
 import Step4Shots from '@/steps/Step4Shots'
 import Step5Video from '@/steps/Step5Video'
+import NoticeBar from '@/components/NoticeBar'
 
 export default function Workflow() {
   const project = useCurrent()
@@ -24,6 +25,9 @@ export default function Workflow() {
       <StepBar project={project} />
 
       <main className="w-full min-w-0 flex-1 px-6 py-4 lg:px-8">
+        {!!project.interruptedGeneration?.length && <NoticeBar action="知道了" onAction={() => useStore.getState().dismissGenerationRecovery()}>
+          上次{project.interruptedGeneration.join('、')}因页面重载中断，已解除等待状态，已有内容已保留。请检查结果后按需重新生成。
+        </NoticeBar>}
         {step === 1 && <Step1Script project={project} locked={locked[0]} />}
         {step === 2 && <Step2Segments project={project} />}
         {step === 3 && <Step3Assets project={project} />}

@@ -14,7 +14,7 @@ function Mention({ text, reference }: { text: string; reference?: Reference }) {
     onFocus={e => { const r = e.currentTarget.getBoundingClientRect(); setAnchor({ top: r.bottom + 5, left: r.left }) }} onBlur={() => setAnchor(null)}>
     <span className="opacity-60">@</span>{text.slice(1)}
     {anchor && createPortal(<span role="tooltip" className="pointer-events-none fixed z-[100] block w-40 rounded-lg border border-white/15 bg-[#202224] p-2 text-xs text-white shadow-xl" style={{ top: Math.min(anchor.top, window.innerHeight - 205), left: Math.max(8, Math.min(anchor.left, window.innerWidth - 168)) }}>
-      {reference ? <>{reference.imageUrl ? <img src={reference.imageUrl} alt={reference.name} className="mb-2 h-32 w-full rounded object-cover" /> : <span className="mb-2 block py-5 text-center text-white/50">还没有参考图</span>}<span className="block">{reference.kind === 'char' ? '角色' : '场景'} · {reference.name}</span></> : '找不到这个角色或场景'}
+      {reference ? <>{reference.imageUrl ? <img src={reference.imageUrl} alt={reference.name} className="mb-2 h-32 w-full rounded bg-black/30 object-contain" /> : <span className="mb-2 block py-5 text-center text-white/50">还没有参考图</span>}<span className="block">{reference.kind === 'char' ? '角色' : '场景'} · {reference.name}</span></> : '找不到这个角色或场景'}
     </span>, document.body)}
   </span>
 }

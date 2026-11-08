@@ -24,7 +24,7 @@ export function videoReferenceImages(shot: Shot, project: Project): VideoReferen
 }
 export function buildReferenceImagePrompt(asset: Asset, project?: Project): string {
   const desc = asset.prompt.trim().replace(/[。，,.；;]+$/, '')
-  const style = project?.config.shotStyle?.trim() ?? ''
+  const style = project?.style?.trim() || '写实电影风格'
   return getPromptBook().templates[asset.kind === 'char' ? 'A' : 'B']
     .split('{prompt}').join(desc).split('{name}').join(asset.name)
     .split('\n').filter(line => style || !line.includes('{风格参考}')).map(line => line.split('{风格参考}').join(style)).join('\n')
@@ -38,7 +38,7 @@ export function buildVideoPrompt(shot: Shot, project: Project, dur: number): str
   if (axis && !/[。！？”」]$/.test(axis)) axis += '。'
   const values: Record<string, string | number> = { ...Object.fromEntries(SHOT_TEXT_FIELDS.map(k => [k, replace(shot[k].trim())])), dur, '画幅': project.config.ratio, '时间轴': axis, '节奏提示': paceHint(dur, beats) }
   return getPromptBook().templates.C.split('\n').flatMap(line => {
-    if (line.startsWith('风格：')) return [line.replace(/\{风格参考[^{}]*\}/g, () => project.config.shotStyle?.trim().replace(/。+$/, '') || '写实电影风格')]
+    if (line.startsWith('风格：')) return [line.replace(/\{风格参考[^{}]*\}/g, () => project.style?.trim().replace(/。+$/, '') || '写实电影风格')]
     if (line.startsWith('参考图：')) {
       const samples = line.match(/@图片\d+[^，…\n]*\{name\}[^，…\n]*/g)
       if (samples?.length !== 2) throw new Error('模板 C 的参考图行需要角色、场景两个示例')

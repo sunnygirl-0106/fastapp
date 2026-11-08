@@ -33,7 +33,7 @@ let count=0
 const check=(name,fn)=>{fn();count++;console.log('PASS Python parity: '+name)}
 try {
  const prompts=await server.ssrLoadModule('/src/services/prompts.ts'),video=await server.ssrLoadModule('/src/services/videoPrompt.ts'),validation=await server.ssrLoadModule('/src/services/validation.ts'),parse=await server.ssrLoadModule('/src/services/parse.ts')
- const project={config:{durMode:'manual',targetDur:15,shotStyle:'3D 卡通',ratio:'9:16 竖屏'},script:'正文',segments:expected.segments.map(s=>({id:'s'+s.ordinal,no:s.ordinal,title:s.title,text:s.text,dur:s.duration_seconds})),assets:expected.assets.map(a=>({id:a.asset_id,kind:a.kind==='character'?'char':'scene',name:a.name,alias:a.alias,prompt:a.prompt,imageUrl:'image-'+a.asset_id})),shots:[]}
+ const project={style:'3D 卡通',config:{durMode:'manual',targetDur:15,shotStyle:'3D 卡通',ratio:'9:16 竖屏'},script:'正文',segments:expected.segments.map(s=>({id:'s'+s.ordinal,no:s.ordinal,title:s.title,text:s.text,dur:s.duration_seconds})),assets:expected.assets.map(a=>({id:a.asset_id,kind:a.kind==='character'?'char':'scene',name:a.name,alias:a.alias,prompt:a.prompt,imageUrl:'image-'+a.asset_id})),shots:[]}
  const shot={...expected.shot,id:'shot1',segId:'s1',no:1,dur:15,timeline:parse.formatTimeline(expected.shot.timeline),assetIds:['a','b']}
  check('模型拍数与 Python 一致：3 拍通过、5 拍报错，含 1/2/4 边界',()=>{
    assert.deepEqual(validation.BEAT_RANGES,expected.beatRanges);assert.equal(validation.MAX_BEATS,expected.maxBeats)
@@ -44,8 +44,8 @@ try {
      assert.deepEqual(errors,sample.errors)
    }} finally {console.warn=warn}
  })
- check('所有字段 derive_asset_ids 顺序、去重、最长名称与 Python 一致',()=>{
-   for(const sample of expected.parity) assert.deepEqual(validation.deriveAssetIds(sample.row,new Map(Object.entries(expected.idByName))),sample.ids)
+ check('画面描述独立推导引用顺序，其他字段不参与',()=>{
+   for(const sample of expected.parity) assert.deepEqual(validation.deriveAssetIds(sample.row,new Map(Object.entries(expected.idByName))),[...new Set(validation.mentions(sample.row.shot ?? '', Object.keys(expected.idByName)).found.map(n=>expected.idByName[n]))])
  })
  check('style_notes 字数、台词排除、无位移、禁词豁免逐条与 Python 一致',()=>{
    for(const sample of expected.parity) assert.deepEqual(validation.styleNotes(sample.row,'镜头（段 1）'),sample.notes)
@@ -54,15 +54,17 @@ try {
    assert.ok(expected.parity[0].notes.every(note=>warnings.includes('[JSONL] '+note)))
  })
  check('原文系统/用户模板/拼接模板',()=>{const book=prompts.getPromptBook();assert.deepEqual(book.systems,expected.systems);assert.deepEqual(book.users,expected.users);assert.deepEqual(book.templates,expected.templates)})
- check('三次用户消息',()=>{assert.equal(prompts.buildSegmentUserMessage(project),expected.segmentUser);assert.equal(prompts.buildAssetUserMessage(project.segments,'人物设定','3D 卡通'),expected.assetUser)
- // JSON whitespace is semantically irrelevant; the Python JSON encoder adds spaces.
- const normalize=s=>s.split('\n').map(line=>{const i=line.indexOf('{');return i>=0?line.slice(0,i)+JSON.stringify(JSON.parse(line.slice(i))):line}).join('\n')
- assert.equal(normalize(prompts.buildShotUserMessage(project,[1],[shot])),normalize(expected.shotUser))})
- check('模板 A/B 成品逐字相等',()=>{assert.deepEqual(project.assets.map(a=>video.buildReferenceImagePrompt(a,project)),expected.stitched.references.map(r=>r.prompt))})
+ check('v16 三次用户消息与模板不残留占位符，统一风格',()=>{
+   const messages=[prompts.buildSegmentUserMessage(project),prompts.buildAssetUserMessage(project.segments,project.style),prompts.buildShotUserMessage(project,[1],[shot])]
+   for(const message of messages) {assert.ok(message.includes('3D 卡通'));assert.ok(!/\{(?:风格参考|拆解生成的风格|用户填写|角色 \/ 场景|name|prompt)[^{}]*\}/.test(message))}
+   assert.ok(!messages[1].includes('剧本设定'));assert.ok(messages[2].includes('角色｜小雨｜蓝色衣服。'))
+   assert.ok(video.buildReferenceImagePrompt(project.assets[0],project).startsWith('画面风格：3D 卡通\n'))
+   assert.ok(video.buildReferenceImagePrompt(project.assets[1],project).endsWith('[视觉风格：3D 卡通]'))
+ })
  check('节奏/Markdown 清理',()=>{assert.deepEqual([4,15,30].map(n=>video.paceHint(n,expected.shot.timeline)),expected.hints);assert.equal(validation.cleanScript('# **人物**\n\\【正文\\】'),expected.clean)})
  check('v8 原始输出中文引号恢复',()=>{
    const script=readFileSync('../测试提示词效果/examples/示例剧本.txt','utf8')
-   const rows=parse.parseSegments(v8QuoteOutput,'manual',30,script)
+   const updated=v8QuoteOutput.split('\n');updated[0]=JSON.stringify({type:'meta',style:'写实电影风格'});const rows=parse.parseSegments(updated.join('\n'),'manual',30,script)
    assert.match(rows[1].text,/“这本书还能修好吗？”/);assert.match(rows[2].text,/“能，明天来取。”/)
    assert.equal(validation.comparable(rows.map(s=>s.text).join('')),validation.comparable(script))
  })
@@ -81,7 +83,7 @@ try {
    assert.deepEqual(parse.encodeShot({...shot,timeline},1).timeline,beats)
  })
  check('非 5 倍数只警告，不拒绝或修改正确合计',()=>{
-   const rows=[{type:'meta',duration_mode:'auto',total_seconds:13},{type:'segment',ordinal:1,title:'正文',text:'正文',duration_seconds:13}]
+   const rows=[{type:'meta',style:'写实电影风格'},{type:'segment',ordinal:1,title:'正文',text:'正文',duration_seconds:13}]
    const warnings=[],warn=console.warn;console.warn=x=>warnings.push(x)
    try{validation.validateSegments(rows,'正文','auto')}finally{console.warn=warn}
    assert.ok(warnings.some(w=>w.includes('不是 5 的倍数')));assert.equal(rows[1].duration_seconds,13)

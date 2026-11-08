@@ -29,12 +29,20 @@ try {
   const state = () => useStore.getState()
   const p = () => state().projects.find((p) => p.id === state().currentId)
   const check = (name, fn) => { fn(); results.push(name); console.log(`PASS ${name}`) }
-  const seed = structuredClone(state().projects[0])
+  const legacy = await server.ssrLoadModule('/src/data/mock.ts')
+  const { refPlaceholder } = await server.ssrLoadModule('/src/data/refPlaceholders.ts')
+  const seed = { ...structuredClone(state().projects[0]), style: '写实电影风格', segments: legacy.sampleSegments(), assets: legacy.sampleAssets().map(a => ({...a, imgState:'done',imageUrl:refPlaceholder(a.kind,'16:9',a.name)})), shots:legacy.sampleShots() }
   seed.script = seed.segments.map(s=>s.text).join('')
-  const earlyMock = await server.ssrLoadModule('/src/services/mockText.ts')
   const timing = await server.ssrLoadModule('/src/utils/timeline.ts')
   const earlyParse = await server.ssrLoadModule('/src/services/parse.ts')
-  seed.shots = earlyParse.parseShots(earlyMock.mockShots(seed,[1,2,3]).text,seed,[1,2,3])
+  const { SHOT_FIELDS } = await server.ssrLoadModule('/src/types.ts')
+  for(const shot of seed.shots) {
+    const names=seed.assets.map(a=>a.name).sort((a,b)=>b.length-a.length)
+    for(const {key} of SHOT_FIELDS) shot[key]=shot[key].replace(new RegExp('(?<!@)('+names.join('|')+')','g'),'@$1')
+    shot.shot='@苏可在@客厅。'+shot.shot
+    shot.timeline=timing.normalizeTimeline(earlyParse.timelineLines(shot.timeline).slice(0,4).join('\n'),shot.dur)
+  }
+  seed.shots=earlyParse.parseShots(earlyParse.jsonl(seed.shots.map((s,i)=>earlyParse.encodeShot(s,i+1))),seed,[1,2,3])
   const reset = (project = seed) => useStore.setState({ projects: [structuredClone(project)], currentId: project.id, step: 1, toast: null })
   // v9 replaces the former two independent stale-state contracts.
   const reasons = (shot = p().shots[0]) => shot.outdated ?? []
@@ -412,9 +420,9 @@ try {
   check('按别名过滤始终显示正式名称',()=>{assert.equal(document.querySelectorAll('[role="option"]').length,1);assert.ok(document.querySelector('[role="option"]').textContent.includes('验收角色'))})
   await key(background,'Enter');await tick(750)
   check('回车选中写半角名称、无额外空格、整体标签且光标在末尾',()=>{assert.equal(background.textContent,'@验收角色');assert.ok(background.querySelector('[contenteditable="false"]'));assert.deepEqual(editorSelection(background),[5,5])})
-  check('背景新引用排在画面描述资产之后并进入视频参考图',()=>{assert.deepEqual(p().shots[0].assetIds,['a2','s_scene1','v10-new']);assert.ok((p().shots[0].background).includes('@验收角色'))})
+  check('背景新引用不改变画面描述的参考图列表',()=>{assert.deepEqual(p().shots[0].assetIds,['a2','s_scene1']);assert.ok((p().shots[0].background).includes('@验收角色'))})
   const videoModule=await server.ssrLoadModule('/src/services/videoPrompt.ts')
-  check('视频模板使用新增引用对应参考图编号',()=>{assert.equal(videoModule.videoReferenceImages(p().shots[0],p()).at(-1).imageUrl,'v10-reference.png');assert.ok(videoModule.buildVideoPrompt(p().shots[0],p(),15).includes('@图片3'))})
+  check('视频模板只给画面描述引用编号，背景其他名称保留普通文本',()=>{assert.ok(!videoModule.videoReferenceImages(p().shots[0],p()).some(r=>r.imageUrl==='v10-reference.png'));assert.ok(!videoModule.buildVideoPrompt(p().shots[0],p(),15).includes('@图片3'))})
   await key(background,'Backspace');await tick(750)
   check('标签后退格整体删除，所有字段均不再引用时移除参考图',()=>{assert.equal(background.textContent,'');assert.ok(!p().shots[0].assetIds.includes('v10-new'))})
   await typeRich(background,'@验收角色')
@@ -434,7 +442,7 @@ try {
   await key(background,'Tab')
   await typeRich(container.querySelector('[aria-label="走位说明"]'),'@验收角色在左侧')
   await key(container.querySelector('[aria-label="走位说明"]'),'Escape');await tick(750)
-  check('走位说明新引用保存后顺序正确，不显示额外建议',()=>{assert.deepEqual(p().shots[0].assetIds,['a2','s_scene1','v10-new']);assert.ok(!container.textContent.includes('字，建议'))})
+  check('走位说明新引用保存后顺序正确，不显示额外建议',()=>{assert.deepEqual(p().shots[0].assetIds,['a2','s_scene1']);assert.ok(!container.textContent.includes('字，建议'))})
 
   await resetLive()
   await mount('/src/components/ShotTextEditor.tsx',{value:Array.from({length:21},(_,i)=>`第${i+1}拍`).join('\n'),timeline:true,assets:[],assetIds:[],label:'时间安排',onChange(){}})
@@ -516,14 +524,14 @@ try {
     }
   })
   check('提示词：拆解用户消息包含模式、目标与原文，auto 目标留空',()=>{
-    assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'auto'}}),'duration_mode：auto\ntarget_seconds：\n剧本：\n测试剧本')
-    assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'manual',targetDur:62}}),'duration_mode：manual\ntarget_seconds：62\n剧本：\n测试剧本')
+    assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'auto'}}),'duration_mode：auto\ntarget_seconds：\n风格参考：\n剧本：\n测试剧本')
+    assert.equal(prompts.buildSegmentUserMessage({...seed,script:'测试剧本',config:{...seed.config,durMode:'manual',targetDur:62}}),'duration_mode：manual\ntarget_seconds：62\n风格参考：\n剧本：\n测试剧本')
   })
   check('提示词：提取与镜头用户消息保留段号、别名、风格和手改字段',()=>{
-    assert.ok(prompts.buildAssetUserMessage(seed.segments,'人物设定','暖光').includes('人物设定\n风格参考：暖光\n剧本段落：'))
-    const project=structuredClone(seed);project.assets[1].alias='小可';project.config.shotStyle='暖光';project.shots[1].action='手改主要动作'
+    assert.ok(prompts.buildAssetUserMessage(seed.segments,'暖光').includes('风格参考：暖光\n剧本段落：'))
+    const project=structuredClone(seed);project.assets[1].alias='小可';project.style='暖光';project.shots[1].action='手改主要动作'
     const message=prompts.buildShotUserMessage(project,[2,3],[project.shots[1]])
-    assert.ok(message.includes('本次需要生成镜头的段号：2,3'));assert.ok(message.includes('别名：小可'));assert.ok(message.includes('风格参考：暖光'));assert.ok(message.includes('手改主要动作'))
+    assert.ok(message.includes('本次需要生成镜头的段号：2,3'));assert.ok(!message.includes('别名：小可'));assert.ok(message.includes('风格参考：暖光'));assert.ok(message.includes('手改主要动作'))
     assert.ok(prompts.buildShotUserMessage(project,[1]).includes('相邻段落的已有镜头'))
   })
   check('JSONL：mock 三种响应均可逐行解析，拆解保留段数与 allocateExact 算法',()=>{
@@ -550,10 +558,10 @@ try {
     const response=mockText.mockSegments({...seed,config:{...seed.config,durMode:'auto'}})
     assert.equal(protocol.parseSegments('```jsonl\n'+response.text+'\n```','auto',undefined,seed.script).length,3)
   })
-  check('JSONL：资产字段映射包含 alias、importance 和角色/场景所属段落',()=>{
+  check('JSONL：资产载入丢弃旧字段，所属段落由程序计算',()=>{
     const assets=protocol.parseAssets(protocol.jsonl(['character','scene'].map((kind,i)=>({type:'asset',client_key:`test-${i}`,kind,name:`名称${i}`,alias:'别名',importance:'major',description:'设定',prompt:'图片描述',segment_ordinals:[1,3]}))))
     assert.deepEqual(assets.map(a=>a.kind),['char','scene'])
-    assets.forEach(a=>{assert.equal(a.alias,'别名');assert.equal(a.importance,'major');assert.ok(!('desc' in a));assert.equal(a.prompt,'图片描述');assert.deepEqual(a.belongSegs,[1,3])})
+    assets.forEach(a=>{assert.equal(a.alias,undefined);assert.equal(a.importance,undefined);assert.ok(!('desc' in a));assert.equal(a.prompt,'图片描述');assert.deepEqual(a.belongSegs,[])})
   })
   check('JSONL：非连续请求段号保持不变，4 拍数组分配时间段，asset_ids 写入',()=>{
     const rows=[2,3].map(no=>({...protocol.encodeShot(seed.shots[no-1],no),timeline:['甲','乙','丙','丁'],asset_ids:['a2','s_scene1']}))
@@ -577,11 +585,11 @@ try {
     project.shots[1].assetIds=['a2'];project.assets[1].name='完全不同的名字'
     assert.deepEqual(utils.shotsReferencingAsset(project,project.assets[1]).map(s=>s.id),['sh2'])
   })
-  check('迁移：缺少 assetIds 按旧规则补齐一次，已有空数组和 6 拍保持',()=>{
+  check('迁移：assetIds 统一按画面描述推导，6 拍保持',()=>{
     const old=structuredClone(seed);old.shots.forEach(s=>delete s.assetIds)
     const migrated=migrateProjects([old])[0];assert.ok(migrated.shots.every(s=>s.assetIds.includes('a2')&&s.assetIds.includes('s_scene1')))
     migrated.shots[0].assetIds=[];migrated.shots[0].timeline='① 甲\n② 乙\n③ 丙\n④ 丁\n⑤ 戊\n⑥ 己'
-    assert.deepEqual(migrateProjects([migrated])[0].shots[0].assetIds,[]);assert.ok(migrated.shots[0].timeline.endsWith('秒：己'))
+    assert.deepEqual(migrateProjects([migrated])[0].shots[0].assetIds,seed.shots[0].assetIds);assert.ok(migrated.shots[0].timeline.endsWith('秒：己'))
   })
   await resetLive();await act(async()=>state().generateVideos(['sh1','sh2','sh3']))
   const originalText=p().segments[0].text
@@ -830,7 +838,7 @@ try {
   })
   check('v13 manual 差额优先加给 15 秒以下最长段，超过 15 秒只提示',()=>{
     assert.deepEqual(validation.fixTotal([5,5,10],45),[15,10,20])
-    const rows=[{type:'meta',duration_mode:'auto',total_seconds:20},{type:'segment',ordinal:1,title:'甲',text:'甲',duration_seconds:20}]
+    const rows=[{type:'meta',style:'写实电影风格'},{type:'segment',ordinal:1,title:'甲',text:'甲',duration_seconds:20}]
     const notes=captureWarnings(()=>validation.validateSegments(rows,'甲','auto'))
     assert.equal(rows[1].duration_seconds,20);assert.ok(notes.some(n=>n.includes('超过 15 秒')))
   })
@@ -857,32 +865,30 @@ try {
     assert.throws(()=>protocol.parseShots(protocol.jsonl([{...row,shot:'@不存在的角色在@客厅'}]),seed,[1]))
     assert.doesNotThrow(()=>protocol.parseShots(protocol.jsonl([{...row,timeline:['停留十秒','转身']}]),seed,[1]))
   })
-  check('v8：资产跨类型重名、场景遗漏和非法段号会拒绝',()=>{
+  check('v16：资产跨类型重名拒绝、空输出拒绝，旧段号字段丢弃',()=>{
     const rows=mockText.mockAssets(seed).text.split('\n').map(JSON.parse)
-    assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.map((r,i)=>({...r,name:i===rows.length-1?rows[0].name:r.name}))),seed.segments))
+    assert.throws(()=>protocol.parseAssets(protocol.jsonl([{...rows[0],kind:'character'},rows[0]]),seed.segments))
     assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.filter(r=>r.kind!=='scene')),seed.segments))
-    assert.throws(()=>protocol.parseAssets(protocol.jsonl(rows.map(r=>({...r,segment_ordinals:[999]}))),seed.segments))
+    assert.doesNotThrow(()=>protocol.parseAssets(protocol.jsonl(rows.map(r=>({...r,segment_ordinals:[999]}))),seed.segments))
   })
   check('v8：用户输入中的美元替换符不会改写原文',()=>{
     const text="台词：$&、$`、$'"
     assert.ok(prompts.buildSegmentUserMessage({...seed,script:text}).endsWith(text))
-    assert.ok(prompts.buildAssetUserMessage([{...seed.segments[0],text}],text,text).includes(text))
-    const project={...seed,segments:[{...seed.segments[0],text}],config:{...seed.config,shotStyle:text}}
+    assert.ok(prompts.buildAssetUserMessage([{...seed.segments[0],text}],text).includes(text))
+    const project={...seed,style:text,segments:[{...seed.segments[0],text}],config:{...seed.config,shotStyle:text}}
     assert.ok(prompts.buildShotUserMessage(project,[1]).includes(text))
   })
-  check('v8：文档解析错误指出缺少的章节，模板 A/B 风格可省略',()=>{
+  check('v8：文档解析错误指出缺少的章节，模板 A/B 使用项目风格',()=>{
     assert.throws(()=>new prompts.PromptBook('缺少章节'),/SEGMENT/)
     const plain=videoPrompts.buildReferenceImagePrompt(seed.assets[0],seed)
-    assert.ok(!plain.includes('画面风格：'))
-    assert.ok(videoPrompts.buildReferenceImagePrompt(seed.assets[0],{...seed,config:{...seed.config,shotStyle:'3D 卡通'}}).includes('画面风格：3D 卡通'))
+    assert.ok(plain.includes('画面风格：写实电影风格'))
+    assert.ok(videoPrompts.buildReferenceImagePrompt(seed.assets[0],{...seed,style:'3D 卡通'}).includes('画面风格：3D 卡通'))
   })
   check('v8：源码和构建产物无密钥，生产构建无费用角标',()=>{
-    const env=(()=>{try{return readFileSync('.env.local','utf8')}catch{return ''}})()
-    const key=env.match(/^OPENROUTER_API_KEY=(.+)$/m)?.[1]?.trim()
     const files=dir=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(join(dir,e.name)):[join(dir,e.name)])
     for(const path of [...files('src'),...files('server'),...files('scripts'),...files('dist'),'vite.config.ts']) {
       const content=readFileSync(path)
-      assert.ok(!key || !content.includes(Buffer.from(key)), '检测到密钥泄露：'+path)
+      assert.ok(!/sk-or-v1-[A-Za-z0-9_-]{20,}/.test(content.toString()), '检测到密钥泄露：'+path)
       if(path.startsWith('dist/')) assert.ok(!content.includes(Buffer.from('已花 $')), '生产构建包含费用角标')
     }
   })

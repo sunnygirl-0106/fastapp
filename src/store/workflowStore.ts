@@ -2,18 +2,22 @@ import { normalizeTimeline, readBeat, saveTimeline } from '@/utils/timeline'
 import { create } from 'zustand'
 import { SHOT_FIELDS, type Asset, type Project, type Shot, type Segment, type OutdatedReason } from '@/types'
 import { COST, MODELS, MODEL_OPTIONS, delay, mockImage, uid, videoCost } from '@/services/generation'
-import { DEFAULT_BALANCE, sampleAssets, sampleSegments, sampleShots, SAMPLE_SCRIPT } from '@/data/mock'
+import { DEFAULT_BALANCE } from '@/data/mock'
 
 import { no2, shotsReferencingAsset, shotGenerationBlocked, allocateSegmentDurations } from '@/utils/project'
 import { supportsDuration, clampDuration, clampTargetDuration, DUR_DEFAULT } from '@/data/duration'
 import { buildAssetImagePrompt } from '@/data/assetTemplates'
-import { parseSegments, parseAssets, parseShots, timelineLines } from '@/services/parse'
+import { parseSegmentResult, parseAssets, parseShots, timelineLines } from '@/services/parse'
 import { mockSegments, mockAssets, mockShots } from '@/services/mockText'
 import { getPromptBook, buildSegmentUserMessage, buildAssetUserMessage, buildShotUserMessage } from '@/services/prompts'
-import { validatedText, TextModelError } from '@/services/textModel'
-import { cleanScript, splitPreface, deriveAssetIds } from '@/services/validation'
+import { validatedText } from '@/services/textModel'
+import { deriveAssetIds } from '@/services/validation'
 import { renameText, mentionParts } from '@/utils/mentions'
 import { buildVideoPrompt, videoReferenceImages } from '@/services/videoPrompt'
+import { demoFixtures, findDemoFixture } from '@/data/demoFixtures'
+import { refPlaceholder } from '@/data/refPlaceholders'
+import { demoReferencePhoto, isLegacyReferencePhoto } from '@/data/refPhotos'
+import { recoverInterruptedProjects } from '@/services/generationRecovery'
 
 function resolveVideoModel(project: Project, ids: string[], model = project.lastVideoModel ?? MODELS.video) {
   return MODEL_OPTIONS.video.some(option => option === model) && project.shots.filter(s => ids.includes(s.id)).every(s => supportsDuration(model, s.dur)) ? model : MODELS.video
@@ -27,6 +31,14 @@ function reflowShot(shot: Shot, dur: number, projectId: string) {
   shot.dur = dur
   const key = `${projectId}:${shot.id}`
   timelineReflows.set(key, (timelineReflows.get(key) ?? 0) + 1)
+}
+
+function syncAssetSegments(p: Project) {
+  const ids = new Map(p.assets.map(a => [a.name, a.id]))
+  p.shots.forEach(s => { s.assetIds = deriveAssetIds(s, ids) })
+  p.assets.forEach(a => {
+    a.belongSegs = p.segments.filter(seg => a.kind === 'char' ? seg.text.includes(a.name) : p.shots.some(s => s.segId === seg.id && s.assetIds?.includes(a.id))).map(seg => seg.no)
+  })
 }
 
 const LS_KEY = 'phanthy.projects.v2'
@@ -88,6 +100,7 @@ interface State {
   back: () => void
   goStep: (n: number) => void
   showToast: (msg: string) => void
+  dismissGenerationRecovery: () => void
 
   // 项目
   createProject: (name: string) => void
@@ -108,7 +121,7 @@ interface State {
 
   // step3 角色与场景
   addAsset: (kind: Asset['kind'], fields: Pick<Asset, 'name' | 'prompt'>) => void
-  generateAssetImages: (ids: string[]) => Promise<void>
+  generateAssetImages: (ids: string[], ratio?: string) => Promise<void>
   clearAssetImage: (id: string) => void
   updateAsset: (id: string, patch: Partial<Asset>) => void
   deleteAsset: (id: string) => void
@@ -148,11 +161,18 @@ export function migrateProjects(projects: Project[]): Project[] {
   projects.forEach((p) => {
     const { segDur: _legacy, ...config } = p.config as typeof p.config & { segDur?: number }
     p.config = { ...config, durMode: config.durMode ?? 'auto' }
+    p.style ||= findDemoFixture(p.script)?.style || p.config.shotStyle?.trim() || '写实电影风格'
+    delete (p as Project & { scriptPreface?: string }).scriptPreface
     delete p.assetsHint
+    let characterIndex = 0
     p.assets.forEach(a => {
       const legacy = a as Asset & { desc?: string }
       a.prompt = a.prompt?.trim() ? a.prompt : legacy.desc ?? ''
       delete legacy.desc
+      delete a.alias
+      delete a.importance
+      if (isLegacyReferencePhoto(a.imageUrl)) a.imageUrl = demoReferencePhoto(a.kind, characterIndex)
+      if (a.kind === 'char') characterIndex++
     })
     p.segments.forEach((seg) => {
       if (typeof seg.dur === 'string') seg.dur = parseInt(seg.dur, 10) || DUR_DEFAULT
@@ -164,11 +184,6 @@ export function migrateProjects(projects: Project[]): Project[] {
     }
     p.shots.forEach((s) => {
       s.segId ??= p.segments[s.no - 1]?.id ?? ''
-      if (!Array.isArray(s.assetIds)) {
-        const seg = p.segments.find((seg) => seg.id === s.segId)
-        s.assetIds = p.assets.filter((a) => SHOT_FIELDS.some(({ key }) => String(s[key] ?? '').includes(a.name)) ||
-          !!seg?.text.includes(a.name) || (a.kind === 'scene' && !!seg && !!a.belongSegs?.includes(seg.no))).map((a) => a.id)
-      }
       s.dur ??= p.segments.find((seg) => seg.id === s.segId)?.dur ?? DUR_DEFAULT
       s.video.versions.forEach((v) => { v.dur ??= DUR_DEFAULT })
       const seg = p.segments.find((seg) => seg.id === s.segId)
@@ -184,6 +199,7 @@ export function migrateProjects(projects: Project[]): Project[] {
       delete legacy.staleReason
     })
   })
+  projects.forEach(syncAssetSegments)
   return backfillVersionTime(projects)
 }
 
@@ -219,27 +235,41 @@ function sortShots(p: Project) {
 function load(): Project[] {
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (raw) return migrateProjects(JSON.parse(raw) as Project[])
+    if (raw) {
+      const projects = migrateProjects(JSON.parse(raw) as Project[])
+      if (recoverInterruptedProjects(projects)) {
+        // Preserve the original data before unlocking an interrupted project.
+        try { localStorage.setItem(`${LS_KEY}.interrupted-backup.${Date.now()}`, raw) } catch { /* Storage can be full. */ }
+        persist(projects)
+      }
+      return projects
+    }
   } catch {
     /* ignore */
   }
-  // 首次：内置「最后的外卖」示例项目（已完成到镜头，视频未生成）
+  // 首次：唯一示例已完成到镜头，视频未生成。
+  const fixture = demoFixtures[0]
   const seed: Project = {
-    id: 'demo_lastfood',
-    name: '最后的外卖',
+    id: 'demo_supplier',
+    name: fixture.name,
     no: 11,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     config: { durMode: 'auto', ratio: '9:16 竖屏', style: '写实', mode: '全自动 AI 生成' },
     balance: DEFAULT_BALANCE,
-    script: SAMPLE_SCRIPT,
+    script: fixture.script,
+    style: fixture.style,
     segStatus: 'done',
     assetStatus: 'done',
     shotStatus: 'done',
-    segments: sampleSegments(),
-    assets: sampleAssets().map((a) => ({ ...a, imgState: 'done', imageUrl: mockImage(a.name, a.id) })),
-    shots: sampleShots(),
+    segments: structuredClone(fixture.segments),
+    assets: fixture.assets.map((a, i) => ({ ...a, imgState: 'done', imageUrl: demoReferencePhoto(a.kind, i) })),
+    shots: [],
   }
+  seed.shots = fixture.shots.map(({ assetNames: _names, ...shot }) => {
+    const seg = seed.segments.find(s => s.no === shot.no)!
+    return { ...shot, id: `demo_shot_${shot.no}`, segId: seg.id, dur: seg.dur!, done: true, outdated: [], video: { state: 'none', versions: [] } }
+  })
   return migrateProjects([seed])
 }
 
@@ -259,6 +289,7 @@ export const useStore = create<State>((set, get) => {
         if (p.id !== projectId) return p
         const copy: Project = JSON.parse(JSON.stringify(p))
         fn(copy)
+        syncAssetSegments(copy)
         copy.updatedAt = Date.now()
         return copy
       })
@@ -275,13 +306,13 @@ export const useStore = create<State>((set, get) => {
   const finishSegments = async (projectId: string | null, previousConfig?: Project['config']) => {
     const input = snapshot(projectId)
     try {
-      if (!__REAL_TEXT__) await delay(1600)
+      await delay(1600)
       const request = { system: getPromptBook().systems[1], user: buildSegmentUserMessage(input) }
-      const segments = await validatedText(request, () => mockSegments(input).text, text => parseSegments(text, input.config.durMode ?? 'auto', input.config.targetDur, input.script))
+      const { segments, style } = await validatedText(request, () => mockSegments(input).text, text => parseSegmentResult(text, input.config.durMode ?? 'auto', input.config.targetDur, input.script))
       patchProject(p => {
         p.balance -= COST.segGen
         p.segments = segments
-        p.scriptPreface = splitPreface(segments, cleanScript(input.script)) ?? ''
+        p.style = style
         p.segStatus = 'done'
       }, projectId)
       get().showToast(`已生成 ${segments.length} 个剧本段落`)
@@ -295,8 +326,8 @@ export const useStore = create<State>((set, get) => {
   const finishAssets = async (projectId: string | null) => {
     const input = snapshot(projectId)
     try {
-      if (!__REAL_TEXT__) await delay(1600)
-      const request = { system: getPromptBook().systems[2], user: buildAssetUserMessage(input.segments, input.scriptPreface, input.config.shotStyle) }
+      await delay(1600)
+      const request = { system: getPromptBook().systems[2], user: buildAssetUserMessage(input.segments, input.style) }
       const assets = await validatedText(request, () => mockAssets(input).text, text => parseAssets(text, input.segments))
       patchProject(p => {
         const prev = new Map(p.assets.map(a => [`${a.kind}:${a.name}`, a]))
@@ -320,12 +351,17 @@ export const useStore = create<State>((set, get) => {
     const targets = input.segments.filter(s => segIds.includes(s.id)).sort((a, b) => a.no - b.no)
     let succeeded = 0, failed = 0, failure = ''
     try {
-      if (!__REAL_TEXT__) await delay(1600)
+      await delay(1600)
       for (let i = 0; i < targets.length; i += 6) {
         const batch = targets.slice(i, i + 6), ordinals = batch.map(s => s.no)
         try {
           const existing = input.shots.filter(s => batch.some(seg => seg.id === s.segId))
-          const request = { system: getPromptBook().systems[3], user: buildShotUserMessage(input, ordinals, existing) }
+          const request = {
+            system: getPromptBook().systems[3], user: buildShotUserMessage(input, ordinals, existing),
+            onAttempt: (attempt: number) => patchProject(p => {
+              p.shotGeneration = { batch: Math.floor(i / 6) + 1, total: Math.ceil(targets.length / 6), attempt, startedAt: Date.now() }
+            }, projectId),
+          }
           const parsed = await validatedText(request, () => mockShots(input, ordinals).text, text => parseShots(text, input, ordinals))
           patchProject(p => {
             for (const next of parsed) {
@@ -366,12 +402,10 @@ export const useStore = create<State>((set, get) => {
           }
         } catch (error) {
           failed += batch.length; failure = message(error)
-          // Stop immediately on budget refusal, including all not-yet-started batches.
-          if (error instanceof TextModelError && error.status === 402) { failed += targets.length - i - batch.length; break }
         }
       }
     } finally {
-      patchProject(p => { p.shotStatus = p.shots.length ? 'done' : 'none' }, projectId)
+      patchProject(p => { p.shotStatus = p.shots.length ? 'done' : 'none'; delete p.shotGeneration }, projectId)
       generatingAssetIds.delete(projectId)
       generatingSegIds.delete(projectId)
       segIds.forEach(id => clearPending(projectId, shotKey(id)))
@@ -433,6 +467,7 @@ export const useStore = create<State>((set, get) => {
     openProject: (id) => set({ currentId: id, screen: 'workflow', step: 1 }),
     back: () => set({ screen: 'projects', currentId: null }),
     goStep: (n) => set({ step: n }),
+    dismissGenerationRecovery: () => patchProject(p => { delete p.interruptedGeneration }),
     showToast: (msg) => {
       set({ toast: msg })
       if (toastT) clearTimeout(toastT)
@@ -576,7 +611,7 @@ export const useStore = create<State>((set, get) => {
       patchProject((p) => {
         const name = fields.name.trim()
         if (!name || !fields.prompt.trim() || p.assets.some((a) => a.name === name)) return
-        const a: Asset = { id: uid('asset'), kind, name, prompt: fields.prompt.trim(), importance: 'minor', imgState: 'none' }
+        const a: Asset = { id: uid('asset'), kind, name, prompt: fields.prompt.trim(), imgState: 'none' }
         a.belongSegs = p.segments.filter((seg) => seg.text.includes(name)).map((seg) => seg.no)
         p.assets.push(a)
         const reason: OutdatedReason = { kind: 'asset', key: a.id, text: `${assetLabel(a)}已新增` }
@@ -590,7 +625,7 @@ export const useStore = create<State>((set, get) => {
       if (message) get().showToast(message)
     },
 
-    generateAssetImages: async (ids) => {
+    generateAssetImages: async (ids, ratio = '16:9') => {
       const projectId = get().currentId
       patchProject((p) => {
         p.assets.forEach((a) => { if (ids.includes(a.id)) a.imgState = 'generating' })
@@ -602,7 +637,7 @@ export const useStore = create<State>((set, get) => {
           const id = ids[i]
           patchProject((p) => {
             const a = p.assets.find((x) => x.id === id)
-            if (a) { console.info('[参考图提示词]', buildAssetImagePrompt(a, p)); a.imgState = 'done'; a.imageUrl = mockImage(buildAssetImagePrompt(a, p), a.id + i); p.balance -= COST.assetImgEach; markVideoOutdated(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`, a.id) }
+            if (a) { console.info('[参考图提示词]', buildAssetImagePrompt(a, p)); a.imgState = 'done'; a.imageUrl = refPlaceholder(a.kind, ratio, a.name); p.balance -= COST.assetImgEach; markVideoOutdated(p, shotsReferencingAsset(p, a).map((s) => s.id), `${assetLabel(a)}参考图已更新`, a.id) }
           }, projectId)
         }
         get().showToast(ids.length > 1 ? '参考图已全部生成' : '参考图已生成')

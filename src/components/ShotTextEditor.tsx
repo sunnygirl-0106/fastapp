@@ -187,7 +187,7 @@ function MentionInput({ value, assets, assetIds, label, placeholder, autoFocus, 
       </button>) : <div className="px-3 py-4 text-xs text-white/50">没有匹配的角色或场景</div>}
     </div>, document.body)}
     {hover && createPortal(<div role="tooltip" className="pointer-events-none fixed z-[130] w-40 rounded-lg border border-white/15 bg-[#202224] p-2 text-xs text-white" style={{ top: Math.min(hover.top, window.innerHeight - 205 * getUiScale()), left: Math.min(hover.left, window.innerWidth - 168 * getUiScale()) }}>
-      {hover.asset.imageUrl ? <img src={hover.asset.imageUrl} alt={hover.asset.name} className="mb-2 h-32 w-full rounded object-cover" /> : <div className="py-5 text-center text-white/50">还没有参考图</div>}{hover.asset.kind === 'char' ? '角色' : '场景'} · {hover.asset.name}
+      {hover.asset.imageUrl ? <img src={hover.asset.imageUrl} alt={hover.asset.name} className="mb-2 h-32 w-full rounded bg-black/30 object-contain" /> : <div className="py-5 text-center text-white/50">还没有参考图</div>}{hover.asset.kind === 'char' ? '角色' : '场景'} · {hover.asset.name}
     </div>, document.body)}
   </>
 }

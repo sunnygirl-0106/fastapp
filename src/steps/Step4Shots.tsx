@@ -133,6 +133,18 @@ export default function Step4Shots({ project }: { project: Project }) {
   const openGeneration = (segNos?: number[]) => { setInitialSelection(segNos); setGenOpen(true) }
   const st = project.shotStatus
   const shots = project.shots
+  const [elapsed, setElapsed] = useState(0)
+  const progress = project.shotGeneration
+  useEffect(() => {
+    if (st !== 'generating' || !progress) return
+    const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - progress.startedAt) / 1000)))
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [st, progress?.startedAt])
+  const progressText = progress
+    ? `第 ${progress.batch}/${progress.total} 批 · ${progress.attempt > 1 ? '返回格式校验未通过，正在重试' : (__REAL_TEXT__ ? '等待模型返回' : '正在生成')} · 已等待 ${Math.floor(elapsed / 60)} 分 ${elapsed % 60} 秒${__REAL_TEXT__ ? '（单次请求最多等待 5 分钟）' : ''}`
+    : '正在准备镜头生成请求…'
 
   const [durationPreview, setDurationPreview] = useState<Record<string, number | undefined>>({})
   const [genOpen, setGenOpen] = useState(false)
@@ -245,7 +257,7 @@ export default function Step4Shots({ project }: { project: Project }) {
         <GeneratingState
           title="正在生成镜头设计"
           desc="AI 正在把剧本段落转化为可生成视频的镜头描述。"
-          phases={['正在设计画面构图…', '正在整理人物动作…', '正在检查镜头连贯性…']}
+          phases={[progressText]}
         />
         <ActionBar>
           <PillCTA disabled>正在生成镜头设计…</PillCTA>
@@ -271,7 +283,7 @@ export default function Step4Shots({ project }: { project: Project }) {
       />
 
 
-      {st === 'generating' && <NoticeBar tone="neutral">正在生成镜头，完成后可操作</NoticeBar>}
+      {st === 'generating' && <NoticeBar tone="neutral">{progressText}</NoticeBar>}
       {/* 工具条：字段 / 筛选 + 已加条件 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {/* 字段：选中/展开时整枚标签高亮（青色描边+底+图标徽章） */}

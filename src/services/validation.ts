@@ -92,7 +92,7 @@ export function validateSegments(rows: Row[], script: string, mode: string, targ
     if (!Number.isInteger(s.duration_seconds) || s.duration_seconds < 4 || s.duration_seconds > 30) errors.push(`段落 ${i + 1}：时长必须为 4–30 的整数`)
     textFields(s, ['title', 'text'], `段落 ${i + 1}`, errors)
   })
-  if (rows[0]?.duration_mode !== mode) errors.push('meta.duration_mode 与输入不一致')
+  textFields(rows[0] ?? {}, ['style'], 'meta', errors)
   const preface = splitPreface(segments, cleanScript(script))
   if (segments.length && preface === null) errors.push('段落原文拼接后不是剧本的结尾部分（已忽略空白），存在改写、遗漏或重复')
   finish(errors, notes)
@@ -102,8 +102,6 @@ export function validateSegments(rows: Row[], script: string, mode: string, targ
     segments.forEach((s, i) => { s.duration_seconds = fixed[i] })
     notes.push(`模型合计 ${total} 秒，已修正为目标 ${target} 秒`); total = target!
   }
-  if (rows[0].total_seconds !== total) notes.push(`meta.total_seconds 已改为段落合计 ${total}`)
-  rows[0].total_seconds = total
   const long = segments.filter(s => s.duration_seconds > 15).map(s => s.ordinal)
   if (long.length) notes.push('以下段落超过 15 秒：' + long.join('、'))
   const odd = segments.filter(s => s.duration_seconds % 5).map(s => s.ordinal)
@@ -113,29 +111,22 @@ export function validateSegments(rows: Row[], script: string, mode: string, targ
   finish([], notes)
   return preface ?? ''
 }
-export function validateAssets(rows: Row[], ordinals: number[]) {
-  const errors: string[] = [], notes: string[] = [], keys = new Set(), names = new Set(), covered = new Set<number>()
+export function validateAssets(rows: Row[]) {
+  const errors: string[] = [], notes: string[] = [], names = new Set()
   let sceneSeen = false
   rows.forEach((r, i) => {
     const label = `资产 ${i + 1}`
     if (r.type !== 'asset') errors.push(`${label}：type 必须为 asset`)
     if (!['character', 'scene'].includes(r.kind)) errors.push(`${label}：kind 必须为 character / scene`)
-    if (!['major', 'minor'].includes(r.importance)) errors.push(`${label}：importance 必须为 major / minor`)
     if (r.kind === 'scene') sceneSeen = true
     else if (r.kind === 'character' && sceneSeen) errors.push(`${label}：角色必须全部在场景之前`)
-    textFields(r, ['client_key', 'name', 'alias', 'prompt'], label, errors, ['alias'])
-    for (const [value, seen, field] of [[r.client_key, keys, 'client_key'], [r.name, names, '名称']] as const) {
+    textFields(r, ['name', 'prompt'], label, errors)
+    for (const [value, seen, field] of [[r.name, names, '名称']] as const) {
       if (typeof value === 'string') { if (seen.has(value)) errors.push(`${label}：${field} 重复`); seen.add(value) }
     }
     if (typeof r.name === 'string' && /[\s()（）@「」]/.test(r.name)) notes.push(`${label}：名称含特殊字符，镜头中的 @引用可能出错`)
-    const nums = r.segment_ordinals
-    if (!Array.isArray(nums) || !nums.length || nums.some(n => !Number.isInteger(n) || !ordinals.includes(n))) errors.push(`${label}：segment_ordinals 必须为存在的段号组成的非空数组`)
-    else if (nums.some((n, j) => j > 0 && n <= nums[j - 1])) errors.push(`${label}：segment_ordinals 必须升序且不重复`)
-    else if (r.kind === 'scene') nums.forEach(n => covered.add(n))
     if (/[A-Za-z]{4,}/.test(r.prompt || '')) notes.push(`${label}：prompt 中出现英文，文档要求只用中文`)
   })
-  const missing = ordinals.filter(n => !covered.has(n))
-  if (missing.length && !errors.length) errors.push('以下段落没有归属任何场景：' + missing.join('、'))
   for (const [kind, limit] of [['character', 20], ['scene', 15]] as const) if (rows.filter(r => r.kind === kind).length > limit) errors.push(`${kind} 数量超过 ${limit}`)
   finish(errors, notes)
 }
@@ -174,7 +165,7 @@ export function styleNotes(row: Row, label: string): string[] {
   return notes
 }
 export function deriveAssetIds(row: Row, idByName: Map<string, string>): string[] {
-  const texts = [row.shot ?? '', ...(row.timeline ?? []), ...SHOT_TEXT_FIELDS.slice(1).map(f => row[f] ?? '')]
+  const texts = [row.shot ?? '']
   return [...new Set(texts.filter(t => typeof t === 'string').flatMap(t => mentions(t, [...idByName.keys()]).found.map(n => idByName.get(n)!)))]
 }
 export const BEAT_RANGES = [[6, 2, 2], [10, 2, 3], [30, 3, 4]] as const
@@ -213,7 +204,6 @@ export function validateShots(rows: Row[], segments: Row[], assets: Row[], targe
     if (!assets.some(a => derived.includes(a.asset_id) && a.kind === 'scene')) errors.push(`${label}：画面描述中没有 @场景`)
     const missing = [...new Set(others.flatMap(m => m.found).filter(n => !derived.includes(idByName.get(n))))].sort()
     if (missing.length) errors.push(`${label}：其他字段引用了画面描述中没有出现的资产：${missing.join('、')}`)
-    if (JSON.stringify(r.asset_ids) !== JSON.stringify(derived)) { notes.push(`${label}：asset_ids 已按画面描述中 @ 的出现顺序修正`); r.asset_ids = derived }
   })
   for (const n of [...targets].sort((a,b) => a-b)) if (actual.get(n) !== 1) errors.push(`段号 ${n} 应恰好有一个 shot，实际 ${actual.get(n) ?? 0} 个`)
   finish(errors, notes)

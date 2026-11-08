@@ -86,20 +86,9 @@ export function projectCover(p: Project): string | undefined {
   const scene = p.assets.find((a) => a.kind === 'scene' && a.imgState === 'done' && a.imageUrl)
   if (scene) return scene.imageUrl
 
-  // 3. 主要角色参考图
-  const major = p.assets.find(
-    (a) => a.kind === 'char' && a.importance === 'major' && a.imgState === 'done' && a.imageUrl,
-  )
-  if (major) return major.imageUrl
-
-  // 4. 任意角色参考图
-  const anyChar = p.assets.find((a) => a.kind === 'char' && a.imgState === 'done' && a.imageUrl)
-  if (anyChar) return anyChar.imageUrl
-
-  // 5. 无 → 调用方渲染统一默认占位
-  return undefined
+  // 3. 第一张角色参考图
+  return p.assets.find(a => a.kind === 'char' && a.imgState === 'done' && a.imageUrl)?.imageUrl
 }
-
 /* ---------- 展示格式 ---------- */
 export const no2 = (n: number) => String(n).padStart(2, '0') // 1 → '01'
 export const fmtDur = (d: number | string | undefined) => d === undefined ? '待分配' : `${parseInt(String(d), 10)} 秒`

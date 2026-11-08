@@ -29,7 +29,7 @@ export interface Asset {
   id: string
   kind: 'char' | 'scene'
   name: string
-  importance: Importance
+  importance?: Importance // 仅兼容只读方案页旧样本
   alias?: string
   prompt: string // 图像提示词（发给 AI）
   imgState: ImgState
@@ -111,10 +111,12 @@ export interface Project {
   assetsHint?: boolean
   balance: number // 星钻余额（全局共享，这里挂项目上便于扣减演示）
   script: string
-  scriptPreface?: string
+  style?: string // 拆解生成的整部剧统一风格
   segStatus: GenStatus
   assetStatus: GenStatus
   shotStatus: GenStatus
+  interruptedGeneration?: string[]
+  shotGeneration?: { batch: number; total: number; attempt: number; startedAt: number }
   segments: Segment[]
   assets: Asset[]
   shots: Shot[]

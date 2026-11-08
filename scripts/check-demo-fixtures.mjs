@@ -19,7 +19,7 @@ try {
   const mock = await server.ssrLoadModule('/src/services/mockText.ts')
   const parse = await server.ssrLoadModule('/src/services/parse.ts')
   const { cleanScript, comparable } = await server.ssrLoadModule('/src/services/validation.ts')
-  const { SAMPLE_SCRIPT } = await server.ssrLoadModule('/src/data/mock.ts')
+  assert.deepEqual(demoFixtures.map(f => f.id), ['supplier'])
   const state = () => useStore.getState()
   const project = () => state().projects.find(p => p.id === state().currentId)
   for (const fixture of demoFixtures) {
@@ -29,7 +29,8 @@ try {
     assert.equal(project().segStatus, 'done', state().toast)
     assert.equal(project().segments.length, fixture.segments.length)
     assert.deepEqual(project().segments.map(s => s.title), fixture.segments.map(s => s.title))
-    assert.ok(sameScript((project().scriptPreface ?? '') + project().segments.map(s => s.text).join(''), fixture.script))
+    assert.ok(comparable(cleanScript(fixture.script)).endsWith(comparable(project().segments.map(s => s.text).join(''))))
+    assert.equal(project().style, fixture.style)
     await state().startAssets()
     assert.equal(project().assetStatus, 'done', state().toast)
     assert.deepEqual(project().assets.map(a => a.name), fixture.assets.map(a => a.name))
@@ -62,13 +63,8 @@ try {
     assert.ok(!other.assets.some(a=>fixture.assets.some(original=>original.name===a.name)))
     console.log(`PASS ${fixture.name}: ${fixture.segments.length} 段、${fixture.assets.length} 个资产、完整五步、6 种目标时长`)
   }
-  const original = structuredClone(project())
-  original.script = SAMPLE_SCRIPT; original.config.durMode = 'auto'
-  original.segments = parse.parseSegments(mock.mockSegments(original).text, 'auto', undefined, original.script)
-  assert.equal(original.segments.length, 3)
-  assert.match(original.segments[1].text, /^动作：\n震动停止/)
   assert.equal(networkCalls, 0)
-  console.log('PASS 原有示例按剧情边界拆解；所有模拟均无网络调用')
+  console.log('PASS 唯一示例完整五步；所有模拟均无网络调用')
 } finally {
   await server.close(); dom.window.close()
   globalThis.setTimeout = timeout; globalThis.fetch = fetch; console.warn = warn

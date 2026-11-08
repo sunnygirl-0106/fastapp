@@ -101,3 +101,45 @@ v15
 - 在现有未提交工作区基础上修改，保留既有 v11–v14 和其他改动，没有回退。
 - 任务开始/结束的 SHA-256 对比确认：提示词文档及 ../测试提示词效果/ 全部文件、src/proposal/ 文件未修改；本轮也未修改 check-python-parity.mjs、check-text-runtime.mjs 或一秒计时 hook。
 - 未执行 git add、git commit 或推送，保持未提交状态供验收。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+v16
+日期：2026-11-08
+
+实现范围
+- 第 3 步角色/场景及新增卡片统一 16:9，网格列宽 260–280px；参考图 contain 居中，深色补边。Lightbox 改用原比例 img，最大 90vw × 82vh。
+- 两处 @ 悬停预览和镜头信息底部参考图完整显示；36px 候选图标保持 cover。视频播放器与第 5 步视频卡片布局未改。
+- 单张、批量默认 16:9，选择比例真正传入 store。新增 refPlaceholder，五种 SVG 原生尺寸，横向角色三视图、场景四宫格及其他比例单视图。
+- 按用户本轮追加要求，预置项目改为三张真实照片：苏逸 1600×900、乌蝉娜迦 900×1600、木屋 1200×1200。照片本地打包，来源见 README。旧项目的系统内置 frame 占位自动换成三种比例；用户上传图和生成的 SVG 不替换。
+- 用户截图发现两张照片下载中断，仅头部尺寸可读但图片不完整。已重新完整下载并逐张打开检查，新增 JPEG 末尾标记和 SOF 尺寸回归，避免残缺文件通过检查。5188 服务端实际返回的三张照片与完整本地文件 SHA-256 一致。
+- 按截图追加修复项目列表封面：contain、居中、不重复、深色底，整张图片可见。
+- 只保留 supplier 示例，预置项目用同一剧本、5 个段落、3 个资产、5 个镜头，视频未生成。删掉 mockText 中苏可专用分支；旧样本只继续用于 proposal 和独立交互回归测试。
+- mock 拆解保存 project.style，示例用 fixture 风格，其他剧本用输入风格或写实电影风格。后续提取、镜头及 A/B/C 模板统一读取 project.style。
+- JSONL 编解码去除旧 meta/asset/shot 输出字段；镜头 assetIds 唯一由 shot 的 @ 首次出现顺序推导；角色所属段落按原文匹配，场景按镜头引用计算，并在编辑/迁移后同步。
+- 本地和构建均为纯 mock，不读取密钥；保留提示词热更新。仓库 promptBook.md 已同步为外部提示词文档的逐字副本。
+
+删除文件清单
+1. docs/Codex任务-v15-时间安排改名与待更新分步显示.md
+2. server/openrouter.mjs（包括模型代理、预算与 /usage 页面）
+3. src/components/UsageBadge.tsx
+4. scripts/accept-text.mjs
+5. scripts/check-budget.mjs
+6. scripts/check-usage-page.mjs
+7. scripts/check-text-runtime.mjs
+另从保留文件移除：真实文本请求函数、相关全局模型名、真实分支、费用角标与“已发出的模型请求可能已计费”提示。mock 校验重试由新参考图检查和原流程检查继续覆盖。
+
+验证结果
+- npm run build：通过。
+- scripts/check-demo-fixtures.mjs：通过；唯一示例完整五步、6 种手动目标时长和非示例剧本，模型请求数 0。
+- scripts/check-workflow.mjs：250 项通过；保留确认即推进、待更新分步显示、引用编辑、视频版本、自动保存及时间安排重排回归。与 v16 冲突的旧字段断言已改为新协议。
+- scripts/check-generation-recovery.mjs：通过；中断恢复、旧结果保留、刷新保护、无自动请求。
+- scripts/check-prompt-watch.mjs：3 项通过；副本文档编辑/原子替换热更新及监听释放。
+- scripts/check-python-parity.mjs：10 项通过；保留未变校验规则与文档原文对照，新用户消息及模板独立检查。测试面板自身旧拼接方法未修改。
+- scripts/check-reference-images.mjs：通过；照片完整性与尺寸、旧占位迁移及上传保留、10 种 SVG 组合、卡片/大图/悬停 DOM、单张与批量比例控件、木屋 16:9/9:16 重生成、视频信息参考图、单一示例、统一风格与回退、mock 校验重试。
+- scripts/check-public-build.mjs：通过；构建为 mock，产物无密钥、账单或真实模型请求入口。
+- src/、server/、vite.config.ts 中未检出 fetch 调用、模型服务入口或 /usage 路由。历史报告和静态防泄漏检查中的服务名称只作为文字/禁止模式保留。
+- git diff --check：通过。src/proposal/ 无改动；外部提示词与测试面板源码、.env.local 未修改。原未提交的生成恢复和 v15 改动保留。未提交或推送。
+
+视觉验收边界
+- 三张真实照片已分别打开，确认全图可解码；新增 DOM 检查覆盖 contain、固定框比例、原图大图以及提示词和完整流程。
+- 浏览器工具创建/获取本地标签持续报 Cannot read properties of undefined (reading 'timeoutMs')，原生 Chrome 入口也超时，因此未宣称完成真实浏览器的最终截图和 Network 面板验收。网络安全依据为删除调用入口、构建扫描和五步离线 fetch 拦截计数 0。

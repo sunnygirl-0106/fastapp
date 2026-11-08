@@ -1,10 +1,7 @@
 # fastapp · PhanthyMovie 全自动 AI 视频工作流（前端复刻）
 
-从「上传剧本 → 分段 → 资产 → 分镜 → 分段生成视频」的完整 5 步工作流前端复刻，
-以截图为功能基线，叠加交互/文案优化。公网为纯前端模拟模式，localStorage 持久化；本地开发可通过服务端代理调用真实文本模型。
-
-## 技术栈
-Vite + React 18 + TypeScript + Tailwind CSS + Zustand。
+从上传剧本、拆解段落、提取资产、设计镜头到生成视频的完整五步工作流，使用 localStorage 持久化。
+本项目只用 mock，不调用真实模型。
 
 ## 本地运行
 ```bash
@@ -13,32 +10,39 @@ npm run dev      # http://localhost:5188/
 npm run build    # 产物在 dist/
 ```
 
-## 在线预览
-推送到 `main` 会经 GitHub Actions 自动构建并部署到 GitHub Pages：
-https://sunnygirl-0106.github.io/fastapp/
+技术栈：Vite + React 18 + TypeScript + Tailwind CSS + Zustand。
 
-生产构建始终使用模拟拆解、资产提取与镜头生成，不调用真实模型、不消耗 API 额度。
+## 示例与检查
 
-新建项目后，可在第一步点击「载入《旧书店》」或「载入《两界供应商 · 第一场》」，再点击拆解。两套示例重放本地成功验收的真实文本模型结果，分别包含 4 / 5 个段落及对应的角色、场景和镜头设计。参考图和视频仍为模拟占位素材。
+第一步可载入《两界供应商 · 第一场》。示例重放内置的五个段落及角色、场景和镜头设计；其他剧本使用基础分段 mock。
+预置项目完成到镜头设计，三张本地真实照片分别演示 16:9（1600×900）、9:16（900×1600）和 1:1（1200×1200）。参考图生成默认 16:9，支持五种比例，使用本地 SVG 示意图；视频使用模拟封面。
 
-`src/data/demoFixtures.json` 仅保存来自本地 acceptance-v9 round1 / round2 的剧本文本和三步模型输出；没有复制账单、请求配置、项目历史或媒体版本。匹配剧本时忽略 Markdown 强调和空白差异；手动时长可行时保留原拆分并重新分配时长。其他输入仅做基础分段，不套用其他剧本的角色和标题。
+离线回归：`node scripts/check-demo-fixtures.mjs`、`node scripts/check-workflow.mjs`。
+其余 `scripts/check-*.mjs` 检查提示词、生成恢复及构建产物。
 
-离线回归检查：`node scripts/check-demo-fixtures.mjs`，覆盖完整五步、资产引用、原文覆盖、目标时长和非示例输入。
-发布流程检查产物中没有密钥和真实模型请求入口。
-
-## 本地密钥与提示词
-
-真实模型密钥只保存在被 Git 忽略的 `.env.local` 中，使用 `OPENROUTER_API_KEY` 配置。
-不要为密钥添加 `VITE_` 前缀。`.env*`、`.usage/` 账单与归档不会提交或部署。
-`PHANTHY_MOCK=1` 可强制本地使用模拟模式；调用真实模型时需取消该环境变量。
+## 提示词
 
 本地优先读取 `../测试提示词效果/全自动工作流提示词.md`，修改后自动刷新。
 公网构建使用仓库内的 `src/data/promptBook.md` 快照，不依赖仓库外的文件。
 发布提示词更新时，将原文档同步到该快照后再构建。
 
+## 在线预览
+
+推送到 `main` 会经 GitHub Actions 自动构建并部署到 GitHub Pages：
+https://sunnygirl-0106.github.io/fastapp/
+
 ## 目录
-- `src/steps/` 5 步页面（剧本/分段/资产/分镜/视频）
-- `src/store/` Zustand 状态 + localStorage 持久化
-- `src/services/` 模拟生成、文本模型客户端与提示词解析
-- `server/` 仅本地开发使用的模型代理和预算控制
-- `src/data/` 内置示例《最后的外卖》
+
+- `src/steps/` 五步工作流页面
+- `src/store/` 状态管理与持久化
+- `src/services/` mock 生成、字段校验和提示词拼接
+- `server/` 本地提示词热更新
+- `src/data/` 示例、参考图占位与提示词快照
+
+## 占位照片来源
+
+预置参考图为 Pexels 照片按目标尺寸导出的本地文件，仅用于展示比例，不代表剧本人物或场景：
+
+- 横图：[Simon Robben · Man in Brown Polo Shirt](https://www.pexels.com/photo/man-in-brown-polo-shirt-614810/)
+- 竖图：[Pixabay · Woman Wearing Black Spaghetti Strap Top](https://www.pexels.com/photo/woman-wearing-black-spaghetti-strap-top-415829/)
+- 方图：[Pexels · 室内场景](https://www.pexels.com/photo/1643383/)

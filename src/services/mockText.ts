@@ -1,7 +1,6 @@
 import { normalizeTimeline, beatText } from '@/utils/timeline'
 import { cleanScript, mentions, fixTotal } from './validation'
 import type { Project, Segment, Shot } from '@/types'
-import { SAMPLE_SCRIPT, sampleAssets, sampleSegments, sampleShots } from '@/data/mock'
 import { findDemoFixture, sameScript } from '@/data/demoFixtures'
 import { allocateSegmentDurations, splitSegmentText } from '@/utils/project'
 import { DUR_DEFAULT } from '@/data/duration'
@@ -14,7 +13,6 @@ import { _SEGMENT_JSONL_SYSTEM_PROMPT, _ASSET_JSONL_SYSTEM_PROMPT, _SHOT_JSONL_S
 export function mockSegments(project: Project) {
   const request = { system: _SEGMENT_JSONL_SYSTEM_PROMPT, user: buildSegmentUserMessage(project) }
   const p = { ...project, segments: [] as Segment[] }
-  const samples = sampleSegments()
   const target = p.config.targetDur ?? 60
   const fixture = findDemoFixture(project.script)
   if (fixture && (p.config.durMode !== 'manual' || (target >= fixture.segments.length * 4 && target <= fixture.segments.length * 30))) {
@@ -23,31 +21,24 @@ export function mockSegments(project: Project) {
       const durations = fixTotal(segments.map(s => s.dur!), target)
       segments.forEach((s, i) => { s.dur = durations[i] })
     }
-    return { request, text: encodeSegments(segments, p.config.durMode ?? 'auto', target) }
+    return { request, text: encodeSegments(segments, fixture.style) }
   }
   const n = p.config.durMode === 'manual' ? Math.max(Math.ceil(target / 15), Math.min(3, Math.floor(target / 4))) : 3
   const script = cleanScript(project.script)
   // Use contiguous slices of the actual script, so mock obeys the same coverage check.
-  const sampleText = samples.map(s => s.text).join('')
-  const isOriginal = sameScript(script, SAMPLE_SCRIPT) || sameScript(script, sampleText)
-  const originalTexts = sameScript(script, SAMPLE_SCRIPT)
-    ? script.split(/(?=动作：\n震动停止。|动作：\n苏可整个人原地弹起)/)
-    : samples.map(s => s.text)
-  const texts = isOriginal && n === 3 ? originalTexts : splitSegmentText(script, n).filter(t => t.trim())
-  p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: isOriginal && n === 3 ? samples[i].title : `剧本段落${i + 1}`, text }))
+  const texts = splitSegmentText(script, n).filter(t => t.trim())
+  p.segments = texts.map((text, i) => ({ id: `s${i + 1}`, no: i + 1, title: `剧本段落${i + 1}`, text }))
   const durations = allocateSegmentDurations(p, p.segments)
   const values = p.config.durMode === 'manual' ? p.segments.map(() => target / p.segments.length) : [...durations.values()]
   const fixed = fixTotal(values, p.config.durMode === 'manual' ? target : values.reduce((n, d) => n + Math.max(5, Math.round(d / 5) * 5), 0))
   p.segments.forEach((seg, i) => { seg.dur = fixed[i] })
-  return { request, text: encodeSegments(p.segments, p.config.durMode ?? 'auto', p.config.targetDur ?? 60) }
+  return { request, text: encodeSegments(p.segments, fixture?.style || p.config.shotStyle?.trim() || '写实电影风格') }
 }
 
 export function mockAssets(p: Project) {
-  const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments, p.scriptPreface, p.config.shotStyle) }
+  const request = { system: _ASSET_JSONL_SYSTEM_PROMPT, user: buildAssetUserMessage(p.segments, p.style) }
   const fixture = findDemoFixture(p.script)
-  const original = sameScript(p.script, SAMPLE_SCRIPT) || sameScript(p.script, sampleSegments().map(s => s.text).join(''))
-  const source = fixture?.assets ?? (original ? sampleAssets() : [{ id: 'demo_scene', kind: 'scene' as const, name: '剧本场景', importance: 'major' as const, prompt: '根据当前剧本呈现环境：' + p.segments.map(s => s.text).join('\n'), imgState: 'none' as const }])
-  const assets = source.map((a) => ({ ...a, belongSegs: p.segments.filter((seg) => a.kind === 'scene' || seg.text.includes(a.name) || fixture?.segments.some(s => sameScript(s.text, seg.text) && a.belongSegs?.includes(s.no))).map((seg) => seg.no) })).filter(a => a.belongSegs.length)
+  const assets = fixture?.assets ?? [{ id: 'demo_scene', kind: 'scene' as const, name: '剧本场景', prompt: '根据当前剧本呈现环境：' + p.segments.map(s => s.text).join('\n'), imgState: 'none' as const }]
   return { request, text: encodeAssets(assets) }
 }
 
@@ -62,11 +53,7 @@ function designShot(p: Project, seg: Segment, old?: Shot): Shot {
   const fixture = findDemoFixture(p.script)
   const recordedSegment = fixture?.segments.find(s => sameScript(s.text, seg.text))
   const recorded = fixture?.shots.find(s => s.no === recordedSegment?.no && s.assetNames.every(name => p.assets.some(a => a.name === name)))
-  const sample = sampleShots().find((s) => s.segId === seg.id)
-  const originalText = sampleSegments().find((s) => s.id === seg.id)?.text
-  // Edited segment text must never reuse an obsolete recorded design.
-  const originalPart = cleanScript(SAMPLE_SCRIPT).split(/(?=动作：\n震动停止。|动作：\n苏可整个人原地弹起)/)[seg.no - 1]
-  const base = recorded ?? (originalText === seg.text || (originalPart && sameScript(originalPart, seg.text)) ? sample : undefined)
+  const base = recorded
   const dur = seg.dur ?? DUR_DEFAULT
   const refs = p.assets.filter((a) => recorded ? recorded.assetNames.includes(a.name) : seg.text.includes(a.name) || a.belongSegs?.includes(seg.no))
   if (!refs.some(a => a.kind === 'scene')) { const scene = p.assets.find(a => a.kind === 'scene'); if (scene) refs.push(scene) }

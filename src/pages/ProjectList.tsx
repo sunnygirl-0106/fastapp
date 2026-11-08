@@ -111,7 +111,7 @@ export default function ProjectList() {
                 >
                   {/* 封面 */}
                   <div
-                    className="relative flex-1 overflow-hidden bg-cover bg-center"
+                    className="relative flex-1 overflow-hidden bg-black/30 bg-contain bg-center bg-no-repeat"
                     style={{ backgroundImage: `url("${cover ?? emptyCover}")` }}
                   >
                     {/* 顶部渐隐，保证操作按钮清晰；空态图本身已带暗底，仅在有封面图时叠加 */}

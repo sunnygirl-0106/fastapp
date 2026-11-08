@@ -1,7 +1,7 @@
-// mock 生成/计费服务 —— 唯一替换点：日后把 delay() 换成真实 API 请求即可
+// 离线 mock 生成与演示星钻消耗。
 
 // 真实占位图池（开源免费图片，本地打包，纯前端离线可用）
-// —— 用于让"已生成的参考图/视频封面"看起来接近真实效果，替代早期的灰色渐变占位
+// 仅用于视频封面，参考图使用 refPlaceholder。
 import frame1 from '@/assets/placeholders/frame-1.jpg'
 import frame2 from '@/assets/placeholders/frame-2.jpg'
 import frame3 from '@/assets/placeholders/frame-3.jpg'
@@ -37,7 +37,7 @@ export function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-// 生成参考图/视频用的"缩略图"：从真实占位图池里按 seed 稳定取一张
+// 视频封面：从本地占位图池里按 seed 稳定取一张
 // 同一资产/镜头始终对应同一张图；不同对象分散取图，接近真实生成效果
 // offset：同一镜头的第 n 个视频版本往后挪一格，保证 v1/v2/v3 画面互不相同
 export function mockImage(_label: string, seed: string, offset = 0): string {

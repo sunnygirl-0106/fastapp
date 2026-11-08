@@ -104,7 +104,7 @@ export default function ShotVideoInfoModal({ project, shot, version, onVersionCh
             : version.referenceImages.length === 0
               ? <p className="text-[13px] text-[#8a8b90]">未使用参考图</p>
               : <div className="flex flex-wrap gap-[14px]">{version.referenceImages.map(ref => <figure key={ref.assetId} className="flex w-[160px] max-w-full flex-col gap-2">
-                <img src={ref.imageUrl} alt={`${ref.label} ${ref.name}`} className="aspect-square w-full rounded-lg bg-[#232428] object-cover" />
+                <img src={ref.imageUrl} alt={`${ref.label} ${ref.name}`} className="aspect-video w-full rounded-lg bg-[#232428] object-contain" />
                 <figcaption className="text-[13px] leading-relaxed text-[#8a8b90]">{ref.label} · {ref.kind === 'char' ? '角色' : '场景'}「{ref.name}」</figcaption>
               </figure>)}</div>}
         </section>

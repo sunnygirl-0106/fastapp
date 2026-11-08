@@ -38,13 +38,9 @@ export default function Lightbox({ title, url, onClose }: { title: string; url?:
             </button>
           </div>
         </div>
-        <div
-          className="aspect-[3/4] h-[82vh] max-h-[55rem] max-w-[90vw] rounded-lg bg-cover bg-center"
-          style={{
-            backgroundImage: url ? `url("${url}")` : undefined,
-            background: url ? undefined : 'linear-gradient(135deg,#2a2a2e,#141416)',
-          }}
-        />
+        {url ? <img src={url} alt={title} className="block max-h-[82vh] max-w-[90vw] rounded-lg bg-black/30 object-contain" /> :
+          <div className="h-[60vh] w-[60vw] rounded-lg" style={{ background: 'linear-gradient(135deg,#2a2a2e,#141416)' }} />}
+
       </div>
     </Overlay>
   )

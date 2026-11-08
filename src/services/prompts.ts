@@ -44,13 +44,14 @@ export const _SHOT_JSONL_SYSTEM_PROMPT = doc.match(/_SHOT_JSONL_SYSTEM_PROMPT\s*
 export function buildSegmentUserMessage(project: Project): string {
   return getPromptBook().users[1].replace('{auto | manual}', project.config.durMode ?? 'auto')
     .replace('{manual 时为目标成片时长，整数秒；auto 时为空}', project.config.durMode === 'manual' ? String(project.config.targetDur ?? 60) : '')
+    .replace('{用户填写的内容，可以为空}', () => project.config.shotStyle?.trim() ?? '')
     .replace('{剧本全文}', () => cleanScript(project.script))
 }
-export function buildAssetUserMessage(segments: Segment[], preface = '', style = ''): string {
+export function buildAssetUserMessage(segments: Segment[], style = ''): string {
   return getPromptBook().users[2].split('\n').flatMap(line => {
     if (line.includes('{段落 1 原文}')) return segments.map(s => line.replace('[1]', `[${s.no}]`).replace('{段落 1 原文}', () => s.text))
     if (line.includes('{段落 2 原文}') || line.trim() === '……') return []
-    return [line.replace('{剧本设定}', () => preface.trim()).replace('{用户填写的内容，可以为空}', () => style.trim())]
+    return [line.replace('{拆解生成的风格}', () => style.trim())]
   }).join('\n')
 }
 export function buildShotUserMessage(project: Project, ordinals: number[], existing: Shot[] = []): string {
@@ -75,11 +76,11 @@ export function buildShotUserMessage(project: Project, ordinals: number[], exist
       return line.replace(/^\[\d+\]/, `[${no}]`).replace('{各字段当前内容}', () => JSON.stringify(sanitized))
     })
     if (line.includes('{标题}')) return project.segments.map(s => line.replace('[1]', `[${s.no}]`).replace('{标题}', () => s.title).replace('{时长}', String(s.dur)).replace('{原文}', () => s.text))
-    if (line.includes('{asset_id}')) return project.assets.map(a => {
-      const values: Record<string, string> = { asset_id: a.id, '角色 / 场景': a.kind === 'char' ? '角色' : '场景', name: a.name, alias: a.alias ?? '', prompt: a.prompt }
+    if (line.includes('{角色 / 场景}')) return project.assets.map(a => {
+      const values: Record<string, string> = { '角色 / 场景': a.kind === 'char' ? '角色' : '场景', name: a.name, prompt: a.prompt }
       return line.replace(/\{([^{}]+)\}/g, (_, k) => values[k])
     })
     if (line.trim() === '……') return []
-    return [line.replace('{例如 2,3}', ordinals.join(',')).replace('{用户填写的内容，可以为空}', () => project.config.shotStyle ?? '')]
+    return [line.replace('{例如 2,3}', ordinals.join(',')).replace('{拆解生成的风格}', () => project.style ?? '写实电影风格')]
   }).join('\n')
 }

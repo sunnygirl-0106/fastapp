@@ -109,7 +109,7 @@ export default function Step3Assets({ project }: { project: Project }) {
     )
 
   // 固定卡宽 210–230，自动排列：适中密度，卡片不随屏拉大
-  const gridCls = 'grid grid-cols-[repeat(auto-fill,minmax(210px,230px))] justify-start gap-4'
+  const gridCls = 'grid grid-cols-[repeat(auto-fill,minmax(260px,280px))] justify-start gap-4'
 
   return (
     <div>
@@ -142,7 +142,7 @@ export default function Step3Assets({ project }: { project: Project }) {
       </ActionBar>
 
       {addKind && <EditableAssetSettingModal
-        a={{ id: 'new-asset', kind: addKind, name: '', prompt: '', importance: 'minor', imgState: 'none' }}
+        a={{ id: 'new-asset', kind: addKind, name: '', prompt: '', imgState: 'none' }}
         project={project} isNew onClose={() => setAddKind(null)}
         onSave={(patch) => addAsset(addKind, { name: patch.name ?? '', prompt: patch.prompt ?? '' })}
       />}
@@ -153,10 +153,10 @@ export default function Step3Assets({ project }: { project: Project }) {
           assets={missing}
           balance={project.balance}
           onClose={() => setBatchOpen(false)}
-          onGen={async (ids, edits) => {
+          onGen={async (ids, edits, ratio) => {
             Object.entries(edits).forEach(([id, prompt]) => updateAsset(id, { prompt }))
             setBatchOpen(false)
-            await generateAssetImages(ids)
+            await generateAssetImages(ids, ratio)
           }}
         />
       )}
@@ -171,7 +171,7 @@ export default function Step3Assets({ project }: { project: Project }) {
             const id = genFor.id
             if (patch.prompt !== genFor.prompt) updateAsset(id, { prompt: patch.prompt })
             setGenFor(null)
-            await generateAssetImages([id])
+            await generateAssetImages([id], patch.ratio)
           }}
         />
       )}
@@ -260,7 +260,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
 
 function AddAssetCard({ kind, onClick }: { kind: Asset['kind']; onClick: () => void }) {
   return <button onClick={onClick} className="relative flex flex-col rounded-lg border border-dashed border-white/20 bg-panel text-sm text-white/60 transition-colors hover:border-brand/50 hover:text-brand">
-    <span aria-hidden className="aspect-square w-full" /><span aria-hidden className="h-[4.125rem]" />
+    <span aria-hidden className="aspect-video w-full" /><span aria-hidden className="h-[4.125rem]" />
     <span className="absolute inset-0 flex flex-col items-center justify-center gap-3"><Plus size="1.75rem" />新增{kind === 'char' ? '角色' : '场景'}</span>
   </button>
 }
@@ -289,16 +289,16 @@ function AssetCard({
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-panel transition-colors hover:border-white/15">
-      {/* 封面：正方形，铺满 —— 已生成用参考图，否则用默认封面图（对齐 Figma node 20:53） */}
+      {/* 封面：固定 16:9，等比完整显示；剩余区域留深色底 */}
       <div
         onClick={onCoverClick}
         tabIndex={inert ? -1 : 0}
-        className={`relative aspect-square overflow-hidden bg-panel2 outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
+        className={`relative aspect-video overflow-hidden bg-panel2 outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
           inert ? 'cursor-default' : 'cursor-pointer'
         }`}
       >
         <div
-          className={`absolute inset-0 bg-center bg-no-repeat ${a.kind === 'char' ? 'bg-contain bg-black/30' : 'bg-cover'}`}
+          className="absolute inset-0 bg-center bg-no-repeat bg-contain bg-black/30"
           style={{ backgroundImage: `url("${done && a.imageUrl ? a.imageUrl : defaultCover}")` }}
         />
         {generating && (
@@ -362,12 +362,12 @@ function GenAssetImageModal({
   a: Asset
   balance: number
   onClose: () => void
-  onConfirm: (patch: { prompt: string }) => void
+  onConfirm: (patch: { prompt: string; ratio: string }) => void
 }) {
   const kindCn = a.kind === 'char' ? '角色' : '场景'
   const [prompt, setPrompt] = useState(a.prompt)
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('1:1')
+  const [ratio, setRatio] = useState('16:9')
   const [res, setRes] = useState('1K')
   const cost = COST.assetImgEach
   const ok = prompt.trim().length > 0
@@ -413,7 +413,7 @@ function GenAssetImageModal({
           <div className="text-[0.875rem] text-white/60">
             合计预计消耗 <span className="text-brand">{fmt(cost)}</span> 星钻（1 张）· 余额 {fmt(balance)}
           </div>
-          <PillCTA disabled={!ok} onClick={() => onConfirm({ prompt })}>
+          <PillCTA disabled={!ok} onClick={() => onConfirm({ prompt, ratio })}>
             确认生成
           </PillCTA>
         </div>
@@ -431,14 +431,14 @@ function BatchModal({
   assets: Asset[]
   balance: number
   onClose: () => void
-  onGen: (ids: string[], edits: Record<string, string>) => void
+  onGen: (ids: string[], edits: Record<string, string>, ratio: string) => void
 }) {
   const [sel, setSel] = useState<string[]>(assets.map((a) => a.id))
   const [prompts, setPrompts] = useState<Record<string, string>>(
     Object.fromEntries(assets.map((a) => [a.id, a.prompt])),
   )
   const [model, setModel] = useState<string>(MODELS.image)
-  const [ratio, setRatio] = useState('1:1')
+  const [ratio, setRatio] = useState('16:9')
   const [res, setRes] = useState('1K')
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -456,7 +456,7 @@ function BatchModal({
       const a = assets.find((x) => x.id === id)
       if (a && prompts[id] !== a.prompt) edits[id] = prompts[id]
     })
-    onGen(sel, edits)
+    onGen(sel, edits, ratio)
   }
 
   const renderGroup = (title: string, list: Asset[], kindCn: string, divider: boolean) =>
