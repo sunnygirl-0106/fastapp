@@ -150,7 +150,8 @@ try {
     const Component = (await server.ssrLoadModule(path)).default
     root=createRoot(container); await act(async()=>root.render(React.createElement(Component,props)))
   }
-  const buttons=()=>[...container.querySelectorAll('button')]
+  // Include controls rendered through portals into this isolated test document.
+  const buttons=()=>[...document.querySelectorAll('button')]
   const button=(text)=>buttons().find((b)=>b.textContent.trim()===text)
   const click=async(el)=>{assert.ok(el,'control exists');await act(async()=>Simulate.click(el))}
   const change=async(el,value)=>{assert.ok(el,'input exists');await act(async()=>{el.value=value;Simulate.change(el)})}
@@ -287,7 +288,8 @@ try {
   check('更多菜单仍可打开单个镜头视频生成确认',()=>assert.ok(button('确认并生成 1 段视频')))
   await click(button('取消'))
   await act(async()=>state().updateShot('sh1',{action:'成片页待更新'}));await mountLive('/src/steps/Step5Video.tsx');await click(button('待更新'))
-  await click(buttons().find(b=>b.textContent.startsWith('✦')&&b.textContent.endsWith('重新生成视频')))
+  // The stale-result dialog is portaled above cards; costs are separate from labels.
+  await click([...document.querySelectorAll('[role="dialog"] button')].find(b=>b.textContent.includes('重新生成视频')))
   check('第 5 步相同标签的视频操作返回镜头页',()=>assert.equal(state().step,4))
 
   await resetLive();await mountLive('/src/steps/Step3Assets.tsx')
@@ -1054,7 +1056,7 @@ try {
     assert.ok(p().shots.every(s=>!hasA(s)));assert.ok(hasB(p().shots[0]));assert.equal(stepHint(4).title,'');assert.equal(stepHint(5).title,'1 个视频待更新')
   })
   await act(async()=>state().updateSegment('s1',{text:'保留前修改原文'}))
-  await mountLive('/src/steps/Step5Video.tsx',{},true);await click(button('待更新'));await click(button('保留'))
+  await mountLive('/src/steps/Step5Video.tsx',{},true);await click(button('待更新'));await click(button('保留当前视频'))
   check('v15 第 5 步保留同时清 A/B，卡片与两处黄点消失',()=>{
     assert.deepEqual(reasons(),[]);assert.ok(!button('待更新'));assert.equal(stepHint(4).title,'');assert.equal(stepHint(5).title,'')
   })

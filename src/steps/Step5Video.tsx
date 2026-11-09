@@ -148,7 +148,7 @@ export default function Step5Video({ project }: { project: Project }) {
                 <div className="flex items-center justify-between text-[0.75rem]">
                   <span className={`font-medium ${done ? 'text-[#00d8dc]' : 'text-[#dcb400]'}`}>
                     {done ? '已完成' : '生成中'}
-                    {!!s.outdated?.length && <OutdatedChip shot={s} project={project} onRegenerateVideo={() => goStep(4)} />}
+                    {!!s.outdated?.length && <OutdatedChip shot={s} onRegenerateVideo={() => goStep(4)} />}
                   </span>
                   <span className="text-white/40">{currentVersion(s.video)?.dur ?? s.dur} 秒</span>
                 </div>
