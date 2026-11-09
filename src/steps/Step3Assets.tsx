@@ -289,7 +289,7 @@ function AssetCard({
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-panel transition-colors hover:border-white/15">
-      {/* 封面：固定 16:9，等比完整显示；剩余区域留深色底 */}
+      {/* 卡片封面固定 16:9，居中裁切铺满；点开大图后完整显示。 */}
       <div
         onClick={onCoverClick}
         tabIndex={inert ? -1 : 0}
@@ -298,7 +298,7 @@ function AssetCard({
         }`}
       >
         <div
-          className="absolute inset-0 bg-center bg-no-repeat bg-contain bg-black/30"
+          className="absolute inset-0 bg-center bg-no-repeat bg-cover bg-black/30"
           style={{ backgroundImage: `url("${done && a.imageUrl ? a.imageUrl : defaultCover}")` }}
         />
         {generating && (

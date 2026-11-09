@@ -148,3 +148,8 @@ v16 追加调整：项目列表封面铺满
 - 按用户最新截图反馈，仅“我的项目”列表封面改为 bg-cover + bg-center，允许居中裁切，消除横向/纵向留边；包括默认空态封面。
 - 第 3 步参考图、Lightbox、@ 悬停预览和镜头信息参考图继续 contain，不改动。
 - npm run build、scripts/check-public-build.mjs、git diff --check 均通过。
+
+v16 追加调整：角色与场景卡片铺满
+- 按用户最新偏好，第 3 步角色与场景卡片也改为 bg-cover + bg-center，保持 16:9 外框，允许裁切以铺满封面。
+- 点开大图、@ 悬停预览、镜头信息底部参考图继续完整显示；生成图片的实际比例与上传逻辑不变。
+- npm run build、scripts/check-reference-images.mjs、scripts/check-public-build.mjs、git diff --check 均通过。

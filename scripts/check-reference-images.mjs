@@ -63,7 +63,7 @@ try {
   await act(async()=>useStore.setState({projects:[seed],currentId:seed.id,screen:'workflow',step:3}))
   await mount('/src/steps/Step3Assets.tsx',{project:seed})
   assert.equal(document.querySelectorAll('.aspect-video.cursor-pointer').length,3)
-  assert.equal(document.querySelectorAll('.bg-contain.bg-no-repeat').length,3)
+  assert.equal(document.querySelectorAll('.bg-cover.bg-center.bg-no-repeat').length,3)
   for(const asset of seed.assets) {
     await mount('/src/components/Lightbox.tsx',{title:asset.name,url:asset.imageUrl,onClose(){}})
     const image=document.querySelector('img')
@@ -73,7 +73,7 @@ try {
     await act(async()=>Simulate.mouseEnter(document.querySelector('span[tabindex]')))
     assert.ok(document.querySelector('[role="tooltip"] img').classList.contains('object-contain'))
   }
-  console.log('PASS 三种比例的参考卡片、大图和 @ 悬停预览完整显示样式')
+  console.log('PASS 三种比例的参考卡片居中铺满，大图和 @ 悬停预览完整显示')
   const missing=structuredClone(seed);missing.assets.forEach(a=>{a.imgState='none';delete a.imageUrl})
   const calls=[], generate=state().generateAssetImages
   await act(async()=>useStore.setState({projects:[missing],generateAssetImages:async(...args)=>calls.push(args)}))
