@@ -109,9 +109,9 @@ export default function ProjectList() {
                   onClick={() => openProject(p.id)}
                   className="group relative flex h-[18.75rem] cursor-pointer flex-col overflow-hidden rounded-lg border border-white/5 bg-card transition-colors hover:border-white/15"
                 >
-                  {/* 封面 */}
+                  {/* 项目封面居中裁切铺满；参考图预览仍完整显示。 */}
                   <div
-                    className="relative flex-1 overflow-hidden bg-black/30 bg-contain bg-center bg-no-repeat"
+                    className="relative flex-1 overflow-hidden bg-black/30 bg-cover bg-center bg-no-repeat"
                     style={{ backgroundImage: `url("${cover ?? emptyCover}")` }}
                   >
                     {/* 顶部渐隐，保证操作按钮清晰；空态图本身已带暗底，仅在有封面图时叠加 */}

@@ -143,3 +143,8 @@ v16
 视觉验收边界
 - 三张真实照片已分别打开，确认全图可解码；新增 DOM 检查覆盖 contain、固定框比例、原图大图以及提示词和完整流程。
 - 浏览器工具创建/获取本地标签持续报 Cannot read properties of undefined (reading 'timeoutMs')，原生 Chrome 入口也超时，因此未宣称完成真实浏览器的最终截图和 Network 面板验收。网络安全依据为删除调用入口、构建扫描和五步离线 fetch 拦截计数 0。
+
+v16 追加调整：项目列表封面铺满
+- 按用户最新截图反馈，仅“我的项目”列表封面改为 bg-cover + bg-center，允许居中裁切，消除横向/纵向留边；包括默认空态封面。
+- 第 3 步参考图、Lightbox、@ 悬停预览和镜头信息参考图继续 contain，不改动。
+- npm run build、scripts/check-public-build.mjs、git diff --check 均通过。
